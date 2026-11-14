@@ -46,7 +46,7 @@ import { handleCompany } from './companyEngine';
 // Screens TESRAX can open by name. Checked per role so a driver asking for "delivery plan" is told it is the owner's screen.
 export const SCREENS: { page: string; name: string; roles: Role[]; words: string[] }[] = [
   { page: 'orders-received', name: 'Orders received', roles: ['owner', 'office'], words: ['orders received', 'approve', 'approve orders', 'pending orders', 'orders pending', 'new orders'] }, // "approve" (do it) opens the screen; "orders to approve", "needs ok", "approvals" are answered in place (W.needsOk)
-  { page: 'verify', name: 'Verify picked', roles: ['owner', 'office'], words: ['verify picked', 'verify', 'to verify', 'picked', 'picked to verify', 'picked orders'] },
+  { page: 'verify', name: 'Verify picked', roles: ['owner', 'office', 'godown'], words: ['verify picked', 'verify', 'to verify', 'picked', 'picked to verify', 'picked orders'] },
   { page: 'billed', name: 'Billed', roles: ['owner', 'office'], words: ['billed', 'billed bills', 'today bills'] },
   { page: 'newshops', name: 'New shops', roles: ['owner', 'office'], words: ['pending shops', 'new shop requests', 'shop requests', 'new shops', 'shops to approve'] },
   { page: 'targets', name: 'Targets', roles: ['owner', 'office'], words: ['sales targets', 'sales target', 'target list', 'target', 'targets'] },

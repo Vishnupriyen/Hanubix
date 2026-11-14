@@ -30,6 +30,10 @@ const packed = async (picked?: number[]) => {
 describe('Verify picked', () => {
   it('the words "Picked — to verify" appear nowhere; the screen is "Verify picked"', () => {
     expect(SCREENS.find(s => s.page === 'verify')!.name).toBe('Verify picked');
+    // the godown can open it too (Ordered/Picked only — PART2_UX.md): a screen word and a Home tile
+    expect(SCREENS.find(s => s.page === 'verify')!.roles).toContain('godown');
+    const home = readFileSync('src/ui/Home.tsx', 'utf8'); const g = home.slice(home.indexOf("role === 'godown'"));
+    expect(g.slice(0, g.indexOf('];'))).toMatch(/page: 'verify'/);
     for (const f of ['src/ui/Home.tsx', 'src/ui/Approve.tsx', 'src/ui/DayClose.tsx', 'src/ui/More.tsx', 'src/core/engine.ts', 'src/App.tsx'])
       expect(readFileSync(f, 'utf8'), f).not.toMatch(/Picked [—–-] to verify/i);
   });
@@ -48,6 +52,8 @@ describe('Verify picked', () => {
     const big = rows.map((r, i) => (i === 0 ? { ...r, picked: 999999 } : r));
     expect(await makeBillBlock(o, big)).toBe(`Stock short for ${ps[0].name}`);
     await expect(verifyAndBill(o.id, big)).rejects.toThrow(`Stock short for ${ps[0].name}`);
+    // a Disc % that is not a number never gets through (Part 2 batch 1 tester finding)
+    expect(await makeBillBlock(o, rows.map((r, i) => (i === 0 ? { ...r, discountPct: NaN } : r)))).toBe("Discount can't be more than 100%");
     const edited = rows.map((r, i) => (i === 0 ? { ...r, picked: 6, rate: 40, discountPct: 10 } : r));
     expect(await makeBillBlock(o, edited)).toBeNull();
     const [a, b] = await Promise.allSettled([verifyAndBill(o.id, edited), verifyAndBill(o.id, edited)]);

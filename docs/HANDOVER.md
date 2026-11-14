@@ -121,6 +121,8 @@ Branch `apk` (repo Vishnupriyen/Hanubix). The owner wants plain, simple words, o
 - Fixes G4 look: Orders received title alone, Excel/Bill reports row under it; bill editor Disc % box (+ "= ₹…"; scheme lines as %,
   old ₹-only lines read-only "₹50 off" box → Disc % on tap) and MRP as a 4th 44 px box; .btn.small and .chip min 44 px; Vans list
   (number on its own line, short sub-line, no outer card) and add form spacing; Reports: chips row, then month select + All to Excel.
+- Fixes G5: verify makeBillBlock refuses a NaN Disc %; partsFor comment corrected; godown opens Verify picked (Home tile + TESRAX words;
+  Ordered/Picked only, no Make bill). Test: verify-picked.
 
 ## Waiting for the owner
 - **Rule (owner, 14 Nov): work only through the AI team** (CLAUDE.md, "Work only through the team"). Part 1 was built by the

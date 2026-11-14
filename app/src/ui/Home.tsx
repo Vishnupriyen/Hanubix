@@ -154,6 +154,7 @@ export function Home({ role, go, open, onOpen }: { role: Role; go: (p: Page) => 
         const inbound = (await db.inbound.toArray()).filter(i => !i.cancelled && !gotIds.has(i.id)).length;
         t = [
           { page: 'pick', icon: PackageOpen, en: 'Pick orders', count: c.toPick, tone: 'bad' },
+          { page: 'verify', icon: ClipboardCheck, en: 'Verify picked', count: c.toApprove || undefined }, // Ordered/Picked only (no rates)
           ...(inbound ? [{ page: 'inbound' as Page, icon: Truck, en: 'Company bills', count: inbound, tone: 'bad' as const }] : []),
           { page: 'load', icon: Truck, en: 'Load vans', count: c.toLoad, tone: 'warn' },
           { page: 'print', icon: Printer, en: 'Print load sheet' },

@@ -41,7 +41,7 @@ export async function makeBillBlock(_o: Pick<Order, 'lines'>, rows: VerifyRow[])
   for (const r of rows) {
     const p = products.get(r.productId); if (!p || r.picked <= 0) continue;
     if (!(r.rate > 0)) return `Rate for ${p.name} must be more than ₹0`;
-    if (r.discountPct != null && (r.discountPct < 0 || r.discountPct > 100)) return "Discount can't be more than 100%";
+    if (r.discountPct != null && !(Number.isFinite(r.discountPct) && r.discountPct >= 0 && r.discountPct <= 100)) return "Discount can't be more than 100%"; // NaN or below 0 too
     const free = applySchemes(p, r.picked, r.rate, activeSchemes(schemes, p, t)).freeQty;
     need.set(p.id, (need.get(p.id) ?? 0) + r.picked + free);
   }
@@ -52,7 +52,8 @@ export async function makeBillBlock(_o: Pick<Order, 'lines'>, rows: VerifyRow[])
   return null;
 }
 
-/** the packed rows for a row's Picked number: the first lot takes the change, the others stay as packed */
+/** the packed rows for a row's Picked number: the earlier lots keep up to what was packed from them and the LAST lot takes
+ *  the rest (more picked than packed lands on the last lot; fewer empties the last lots first, the first lot is always kept) */
 function partsFor(r: VerifyRow): Part[] {
   let left = r.picked;
   const out = r.parts.map((p, k) => { const take = k === r.parts.length - 1 ? left : Math.min(left, p.qty); left -= take; return { ...p, qty: take, line: r.line }; });
