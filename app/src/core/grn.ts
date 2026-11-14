@@ -38,7 +38,9 @@ export function compareQr(inb: Inbound, qr: EinvQr, myGstin: string): string[] {
 }
 
 // ---------------------------------------------------------------- differences, typed
-export interface Diff { productId: string; qty: number }
+/** a difference at receipt: pieces of a product short or damaged; `line` (1, 2 …) when it is for one line of the bill —
+ *  without it, the pieces are taken from the product's lines in bill order (the same product may be on several lines) */
+export interface Diff { productId: string; qty: number; line?: number }
 const SHORT = /\b(short|shortage|missing|less|not received|not come|didn t come)\b/;
 const DAMAGED = /\b(damaged|damage|broken|leak|leaked|leaking|torn|crushed|wet|expired)\b/;
 /** "coconut oil 2 case short, 1 case sambar damaged" against THIS bill's products only */
@@ -67,13 +69,22 @@ export async function receiveInbound(id: string, short: Diff[], damaged: Diff[])
   if (await db.receipts.get(id)) throw new Error('This bill is already received.');
   if (inb.cancelled) throw new Error('The company cancelled this bill.');
   if (inb.lines.some(l => !l.productId)) throw new Error('A product on this bill is not in your list yet. Sync once and open the bill again.');
-  const sum = (list: Diff[], pid: string) => list.filter(d => d.productId === pid).reduce((a, d) => a + d.qty, 0);
   for (const d of [...short, ...damaged]) {
     if (!Number.isInteger(d.qty) || d.qty <= 0) throw new Error('A difference must be a whole number of pieces.');
-    const l = inb.lines.find(x => x.productId === d.productId);
-    if (!l) throw new Error('A difference is for a product that is not on this bill.');
+    if (!inb.lines.some(x => x.productId === d.productId)) throw new Error('A difference is for a product that is not on this bill.');
+    if (d.line != null && inb.lines[d.line - 1]?.productId !== d.productId) throw new Error('A difference is for a line that is not on this bill.');
   }
-  for (const l of inb.lines) if (sum(short, l.productId) + sum(damaged, l.productId) > l.qty + (l.freeQty ?? 0)) throw new Error(`${l.name}: more short or damaged than the bill has.`);
+  // every difference attached to its line: a line's short + damaged never comes to more than that line's qty + free
+  const room = inb.lines.map(l => l.qty + (l.freeQty ?? 0));
+  const perLine = inb.lines.map(() => ({ short: 0, damaged: 0 }));
+  const take = (d: Diff, kind: 'short' | 'damaged') => {
+    let left = d.qty;
+    const at = d.line != null ? [d.line - 1] : inb.lines.map((l, i) => l.productId === d.productId ? i : -1).filter(i => i >= 0);
+    for (const i of at) { const q = Math.min(left, room[i]); if (q <= 0) continue; room[i] -= q; perLine[i][kind] += q; left -= q; }
+    if (left > 0) throw new Error(`${inb.lines[at[0]].name}: more short or damaged than the bill has.`);
+  };
+  for (const d of [...short, ...damaged].filter(d => d.line != null)) take(d, short.includes(d) ? 'short' : 'damaged');
+  for (const d of [...short, ...damaged].filter(d => d.line == null)) take(d, short.includes(d) ? 'short' : 'damaged');
   // two phones offline must not both put the goods into stock: the server lets one phone receive it
   const url = await server();
   if (url) {
@@ -84,20 +95,22 @@ export async function receiveInbound(id: string, short: Diff[], damaged: Diff[])
   const me = session().userId;
   const month = today().slice(0, 7);
   const cs = new ChangeSet();
-  for (const l of inb.lines) {
-    const good = l.qty + (l.freeQty ?? 0) - sum(short, l.productId) - sum(damaged, l.productId);
-    if (good > 0) cs.put('batches', { productId: l.productId, batch: l.batch || inb.number, expiry: l.expiry || daysFrom(365), mrp: l.mrp ?? 0, qty: good, godown: 'Main' }, 'stock in from company bill');
-  }
+  // each line its own lot (the same product on two lines stays two records); a blank batch is the bill number
+  const lotOf = inb.lines.map((l, i) => {
+    const good = l.qty + (l.freeQty ?? 0) - perLine[i].short - perLine[i].damaged;
+    return good > 0 ? cs.put('batches', { productId: l.productId, batch: l.batch || inb.number, expiry: l.expiry || daysFrom(365), mrp: l.mrp ?? 0, qty: good, godown: 'Main' }, 'stock in from company bill').id : undefined;
+  });
   const purchase = cs.put<Purchase>('purchases', {
     companyId: inb.companyId, billNo: inb.number, date: inb.date, source: 'company',
-    lines: inb.lines.map(l => ({ productId: l.productId, batch: l.batch ?? '', expiry: l.expiry ?? '', mrp: l.mrp ?? 0, qty: l.qty, freeQty: l.freeQty ?? 0, rate: l.rate, discount: 0, gst: l.gst, amount: l.taxable })),
+    lines: inb.lines.map((l, i) => ({ productId: l.productId, batch: l.batch || inb.number, expiry: l.expiry ?? '', mrp: l.mrp ?? 0, qty: l.qty, freeQty: l.freeQty ?? 0, rate: l.rate, discount: 0, gst: l.gst, amount: l.taxable, ...(lotOf[i] ? { batchId: lotOf[i] } : {}) })),
     taxable: inb.taxable, tax: inb.tax, total: inb.total,
   } as Purchase, 'purchase from company bill');
   const coId = (pid: string) => inb.lines.find(l => l.productId === pid)!.coProductId;
-  for (const [list, why] of [[short, 'Short at receipt'], [damaged, 'Damaged at receipt']] as [Diff[], string][]) for (const d of list) {
-    const l = inb.lines.find(x => x.productId === d.productId)!;
-    cs.put<ClaimEntry>('claimEntries', { companyId: inb.companyId, month, kind: 'shortage', productId: d.productId, qty: d.qty, amount: r2(d.qty * l.rate * (1 + l.gst / 100)), note: `${why} · ${l.name}`, refNumber: inb.number, irn: inb.irn } as ClaimEntry, 'receipt difference → claim');
-  }
+  // one claim line per bill line and kind, at that line's own rate
+  for (const kind of ['short', 'damaged'] as const) inb.lines.forEach((l, i) => {
+    const qty = perLine[i][kind]; if (!qty) return;
+    cs.put<ClaimEntry>('claimEntries', { companyId: inb.companyId, month, kind: 'shortage', productId: l.productId, qty, amount: r2(qty * l.rate * (1 + l.gst / 100)), note: `${kind === 'short' ? 'Short at receipt' : 'Damaged at receipt'} · ${l.name}`, refNumber: inb.number, irn: inb.irn } as ClaimEntry, 'receipt difference → claim');
+  });
   const diff = short.length + damaged.length > 0;
   cs.put<Receipt>('receipts', { id: inb.id, inboundId: inb.id, companyId: inb.companyId, status: diff ? 'disputed' : 'received', receivedAt: nowIso(), receivedBy: me, purchaseId: purchase.id,
     short: short.map(d => ({ productId: coId(d.productId), qty: d.qty })), damaged: damaged.map(d => ({ productId: coId(d.productId), qty: d.qty })) } as Receipt, 'company bill received');

@@ -53,11 +53,7 @@ export async function profitAndLoss(period: 'today' | 'month'): Promise<Pnl> {
   const incExp = exps.filter(e => e.category === 'income'); if (incExp.length) income.push({ key: 'other-income', label: 'Other income', amount: r2(incExp.reduce((a, e) => a + e.amount, 0)), items: incExp.map(e => ({ d: e.date, t: e.note ?? '', v: e.amount })) });
 
   // cost of the pieces the shops kept: pieces still out on the bill + pieces written off as damaged (not back in stock)
-  const batchRate = new Map<string, { date: string; rate: number }>();
-  for (const pu of await db.purchases.toArray()) for (const l of pu.lines) {
-    if (!(l.rate > 0) || !l.batch) continue; const k = `${l.productId}|${l.batch}`; const was = batchRate.get(k);
-    if (!was || pu.date >= was.date) batchRate.set(k, { date: pu.date, rate: l.rate });
-  }
+  const { byLot, byBatch } = await lotCostRates();
   const buy = (pid: string) => { const r = products.get(pid)?.purchaseRate; return typeof r === 'number' && Number.isFinite(r) ? r : 0; };
   const restockLabel = new Set<string>(DELIVERY_REASONS.filter(r => r.restock).map(r => r.label));
   const cogsItems = invs.map(i => {
@@ -68,7 +64,7 @@ export async function profitAndLoss(period: 'today' | 'month'): Promise<Pnl> {
     for (const l of i.lines) {
       // cost: the batch's rate on its company bill, else the rate stamped on the line when billed, else today's rate
       const lineRate = typeof l.costRate === 'number' && Number.isFinite(l.costRate) ? l.costRate : buy(l.productId);
-      for (const b of l.batches) v += b.qty * (batchRate.get(`${l.productId}|${b.batch}`)?.rate ?? lineRate);
+      for (const b of l.batches) v += b.qty * (byLot.get(b.batchId) ?? byBatch.get(`${l.productId}|${b.batch}`) ?? lineRate);
       if (!seen.has(l.productId)) { seen.add(l.productId); v += damaged(l.productId) * lineRate; }
     }
     return { d: i.date, t: i.number, v: r2(v) };
@@ -88,4 +84,18 @@ export function pnlTotals(d: Pnl) {
   const income = r2(d.income.reduce((a, h) => a + h.amount, 0)), expense = r2(d.expense.reduce((a, h) => a + h.amount, 0));
   const profit = r2(income - expense);
   return { income, expense, profit, pct: income ? Math.round(profit / income * 100) : 0 };
+}
+
+/** what each lot cost on its purchase bill: by the lot itself (a purchase line names its lot — the same product on two
+ *  lines of one bill is two lots, each its own rate), else by product + batch for older purchases (the latest bill wins) */
+export async function lotCostRates() {
+  const byLot = new Map<string, number>();
+  const latest = new Map<string, { date: string; rate: number }>();
+  for (const pu of await db.purchases.toArray()) for (const l of pu.lines) {
+    if (!(l.rate > 0)) continue;
+    if (l.batchId) byLot.set(l.batchId, l.rate);
+    if (!l.batch) continue; const k = `${l.productId}|${l.batch}`; const was = latest.get(k);
+    if (!was || pu.date >= was.date) latest.set(k, { date: pu.date, rate: l.rate });
+  }
+  return { byLot, byBatch: new Map([...latest].map(([k, v]) => [k, v.rate])) };
 }

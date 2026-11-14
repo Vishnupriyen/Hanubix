@@ -111,6 +111,9 @@ Branch `apk` (repo Vishnupriyen/Hanubix). The owner wants plain, simple words, o
   product rate (lower only with rateRemark), no Disc %), rep orders own-only on push, repeated line numbers, Disc % before the no-qty skip,
   van numbers unique on the server, movement cap 1,000,000; sync replies `reasons` shown in the held message. Order `activity` is an
   append-only edit trail (stored entries must stay a prefix, new entries stamped with the token user) — NOT a hash chain. Tests: server safety §10.
+- Fixes G2 stock: company-bill differences attach to lines (Diff.line, else the product's lines in order; each line checked against its
+  own qty + free) — 2×10 with 4 short now stocks 16; each line its own lot (blank batch = bill no.), purchase lines name their lot
+  (batchId) and P&L costs by lot first (lotCostRates); typed purchases refuse only a true double (product+batch+expiry+rate). Test: part2-stock-lines.
 
 ## Waiting for the owner
 - **Rule (owner, 14 Nov): work only through the AI team** (CLAUDE.md, "Work only through the team"). Part 1 was built by the

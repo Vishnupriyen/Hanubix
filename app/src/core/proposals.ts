@@ -133,6 +133,10 @@ export async function validate(p: Proposal): Promise<Validation> {
         if (n(r.rate) <= 0) err(v, i, 'rate', 'Rate missing');
         if (!s(r.batch)) err(v, i, 'batch', 'Batch missing');
         const exp = toIsoDate(s(r.expiry));
+        // the same product on two lines is fine (another batch, another rate — each its own lot); the same product, batch,
+        // expiry and rate twice is the bill typed twice
+        const key = (x: typeof r) => `${s(x.productId)}|${s(x.batch).toUpperCase()}|${toIsoDate(s(x.expiry))}|${n(x.rate)}`;
+        if (s(r.productId) && s(r.productId) !== '__new' && p.rows.slice(0, i).some(x => key(x) === key(r))) err(v, i, 'productId', 'This product is listed twice with the same batch and expiry. Check the bill.');
         if (!exp) err(v, i, 'expiry', 'Expiry date missing');
         else if (exp < today()) err(v, i, 'expiry', 'Already expired');
         else if ((new Date(exp).getTime() - Date.now()) / 86400000 < 60) v.warnings.push(`Row ${i + 1}: expires within 60 days`);
@@ -489,9 +493,10 @@ async function commitProposal(p: Proposal): Promise<Committed> {
         const qty = n(r.qty) + n(r.free);
         const expiry = toIsoDate(s(r.expiry));
         const existing = batches.find(b => b.productId === prod!.id && b.batch === s(r.batch));
-        if (existing) { existing.qty += qty; cs.put('batches', { ...existing }, 'stock in'); }
-        else cs.put<Batch>('batches', { productId: prod.id, batch: s(r.batch), expiry, mrp: n(r.mrp) || prod.mrp, qty, godown: 'Main' }, 'stock in');
-        lines.push({ productId: prod.id, batch: s(r.batch), expiry, mrp: n(r.mrp), qty: n(r.qty), freeQty: n(r.free), rate: n(r.rate), discount: n(r.discount), gst: n(r.gst) || prod.gst, amount: n(r.amount) });
+        let lotId: string;
+        if (existing) { existing.qty += qty; lotId = cs.put('batches', { ...existing }, 'stock in').id; }
+        else lotId = cs.put<Batch>('batches', { productId: prod.id, batch: s(r.batch), expiry, mrp: n(r.mrp) || prod.mrp, qty, godown: 'Main' }, 'stock in').id;
+        lines.push({ productId: prod.id, batch: s(r.batch), expiry, mrp: n(r.mrp), qty: n(r.qty), freeQty: n(r.free), rate: n(r.rate), discount: n(r.discount), gst: n(r.gst) || prod.gst, amount: n(r.amount), batchId: lotId });
       }
       const taxable = r2(lines.reduce((a, l) => a + l.qty * l.rate - l.discount, 0));
       const tax = r2(lines.reduce((a, l) => a + (l.qty * l.rate - l.discount) * l.gst / 100, 0));

@@ -328,6 +328,7 @@ export interface Purchase extends Base {
   lines: {
     productId: string; batch: string; expiry: string; mrp: number;
     qty: number; freeQty: number; rate: number; discount: number; gst: number; amount: number;
+    batchId?: string; // the lot this line's pieces went into (Part 2: the same product on two lines = two lots, each its own cost)
   }[];
   taxable: number;
   tax: number;
