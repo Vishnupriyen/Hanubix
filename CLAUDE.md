@@ -49,6 +49,15 @@ reviews by itself — every piece of work is handed to the right agent above (de
 security-operations checks data and safety, tesrax-language-specialist checks any TESRAX change, gst-accounts-specialist any money
 or tax change, independent-tester every change). Each part: business-analyst → systems-engineer → ux-designer → developer →
 independent-tester → ui-designer → security-operations (+ specialists for their areas) → push. Cheap models for checks.
+**Work sizes — speed (owner, 14 Nov 2026).** Pick the size first; only big work goes through everyone.
+- **Small** (wording, look, one screen, a simple bug): developer → independent-tester → push. ~30–60 min.
+- **Medium** (a new report, field or TESRAX phrase set): one planning step (business-analyst covers requirements + screens) →
+  developer → independent-tester + only the reviewer for that area (UI, GST or security), in parallel → push. ~half a day.
+- **Big** (money, GST, stock, login, sync, new modules): full team as above — but planning reviewers (systems, UX, GST) run in
+  PARALLEL on the plan, and checking reviewers (tester, UI, security, specialists) run in PARALLEL on the finished batch, never one
+  after another. One combined fix job per batch.
+- The developer ticks docs/CHECKLISTS.md before handing over (built from past findings) so reviews find less.
+- Reviewers report findings only, short; the manager sends one combined fix job; the owner hears one update per batch.
 **Using usage wisely (owner, 13 Nov 2026 — every chat and every agent follows this):**
 - **Ask before any big job.** Split it into parts; show the owner each part's result and get his yes before the next. Never run a
   whole round ("build it complete") as one long job — tell him the size first ("about N parts").
