@@ -56,6 +56,20 @@ describe('sync replies the phone must act on', () => {
     expect(calls).toBe(1); // a held record does not loop the sync
   });
 
+  it('the server\'s reason for a refusal reaches the person (Part 2 batch 1: "a company order has each product once")', async () => {
+    const cs = new ChangeSet();
+    const fresh = cs.put('orders', { shopId: 's1', lines: [], status: 'new', date: '2026-11-11', issues: [], invoiceIds: [] });
+    await cs.commit('offline work');
+    vi.stubGlobal('fetch', async (u: string, init: { body: string }) => {
+      if (!u.endsWith('/v1/sync')) return ok({}, 404);
+      const b = JSON.parse(init.body) as Sent;
+      const k = `orders|${fresh.id}`;
+      return ok({ cursor: 2, changes: [], accepted: keys(b).filter(x => x !== k), rejected: [k], current: [], reasons: { [k]: 'a company order has each product once' } });
+    });
+    const { syncNow } = await import('../src/core/sync');
+    expect(await syncNow()).toMatch(/1 held: not accepted by the server \(a company order has each product once\)/);
+  });
+
   it('pushes at most ~2 MB per request (photos), in batches, until everything is sent', async () => {
     const photo = 'data:image/jpeg;base64,' + 'A'.repeat(200 * 1024);
     const cs = new ChangeSet({ noAudit: true });

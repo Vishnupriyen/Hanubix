@@ -107,6 +107,10 @@ Branch `apk` (repo Vishnupriyen/Hanubix). The owner wants plain, simple words, o
   priceLines/makeInvoices free once on line 1, stock out once (new bill moves id mv:{bill}:{lot}), shortages/credits per line, Delivery per
   line, hsnSummary from lines, company orders refused (phone + server). Chaos adds duplicate lines + "free twice" law (12×1000 green).
   Tests: same-product-twice (GST worked example ₹1,652 / HSN 15→17), part2-tesrax (Disc % by voice).
+- Fixes G1 security: server orderRule/orderRates (staff phones: own orders only, salesman new-only edits/cancel, godown → picked only,
+  product rate (lower only with rateRemark), no Disc %), rep orders own-only on push, repeated line numbers, Disc % before the no-qty skip,
+  van numbers unique on the server, movement cap 1,000,000; sync replies `reasons` shown in the held message. Order `activity` is an
+  append-only edit trail (stored entries must stay a prefix, new entries stamped with the token user) — NOT a hash chain. Tests: server safety §10.
 
 ## Waiting for the owner
 - **Rule (owner, 14 Nov): work only through the AI team** (CLAUDE.md, "Work only through the team"). Part 1 was built by the

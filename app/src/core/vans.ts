@@ -27,13 +27,13 @@ export async function saveVan(input: VanInput): Promise<Van> {
   try {
     const all = await db.vans.toArray();
     if (!input.id && all.some(v => vanActive(v) && v.name.trim().toLowerCase() === name.toLowerCase() && vanKey(v.number) === vanKey(number))) throw new Error(`${name} is already added.`);
-    const twin = vanKey(number) && all.find(v => v.id !== input.id && vanActive(v) && vanKey(v.number) === vanKey(number));
-    if (twin) throw new Error(`Number already used by ${twin.name}`);
     const was = input.id ? all.find(v => v.id === input.id) : undefined;
     if (input.id && !was) throw new Error('Van not found.');
+    const twin = vanKey(number) && (!was || vanActive(was)) && all.find(v => v.id !== input.id && vanActive(v) && vanKey(v.number) === vanKey(number));
+    if (twin) throw new Error(`Number already used by ${twin.name}`);
     const cs = new ChangeSet();
     const { capacity: _c, ...rest } = { ...(was ?? {}), ...input } as Van & { capacity?: number | null }; void _c;
-    const van = cs.put<Van>('vans', { ...rest, name, number, driverId: input.driverId || undefined, ...(cap !== undefined ? { capacity: cap } : {}), active: true }, was ? 'van changed' : 'van added');
+    const van = cs.put<Van>('vans', { ...rest, name, number, driverId: input.driverId || undefined, ...(cap !== undefined ? { capacity: cap } : {}), active: was ? was.active : true }, was ? 'van changed' : 'van added');
     await linkDriver(cs, van, was?.driverId, all);
     await cs.commit(was ? 'Van changed' : 'Van added');
     return van;

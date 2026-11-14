@@ -223,7 +223,7 @@ describe('4. time, refused records, grace lock', () => {
   it('a phone clock more than 5 minutes ahead is refused (it would freeze the record)', async () => {
     const r = await sync(T.salesman, [{ table: 'orders', id: 'o-fut', updatedAt: '2099-01-01T00:00:00Z', data: { total: 99, status: 'new', lines: [] } }]);
     expect(r.body.rejected).toEqual(['orders|o-fut']);
-    expect((await sync(T.salesman, [ch('orders', 'o-ok', { status: 'new', lines: [] }, 4 * 60000)])).body.rejected).toEqual([]);
+    expect((await sync(T.salesman, [ch('orders', 'o-ok', { status: 'new', salesmanId: 'st-salesman', lines: [] }, 4 * 60000)])).body.rejected).toEqual([]);
   });
 
   it('an older copy is ignored and the reply carries the newer server copy', async () => {
@@ -403,5 +403,104 @@ describe('4b. refusals that are not about the rules keep the phone\'s copy (held
     const ahead = await sync(T.salesman, [ch('visits', 'v-keep', { note: 'clock ahead' }, 20 * 60000)]);
     expect(ahead.body.rejected).toEqual(['visits|v-keep']);
     expect(ahead.body.current.find((c: Ch) => c.id === 'v-keep')).toBeUndefined();
+  });
+});
+
+// Part 2 batch 1 security review (14 Nov 2026): a crafted push from a staff phone must not change rates, discounts,
+// approvals, another person's orders or the order history. Each case failed before its fix (written first).
+describe('10. orders from staff phones (Part 2 batch 1)', () => {
+  const G = { t: '' }; // the godown's phone and PIN changed in block 6: log in again
+  const o = (x: Record<string, unknown> = {}) => ({ shopId: 's1', salesmanId: 'st-salesman', source: 'salesman', lines: [{ productId: 'pr1', qty: 2, rate: 50, line: 1 }], status: 'new', issues: [], date: today(), invoiceIds: [], ...x });
+  beforeAll(async () => {
+    expect((await sync(T.owner, [ch('products', 'pr1', { name: 'Tea', rate: 50, gst: 5 }), ch('products', 'pr2', { name: 'Coffee', rate: 80, gst: 5 }),
+      ch('orders', 'oa', o({ status: 'approved', approvedBy: T.ownerId, approvedAt: iso(), activity: [{ at: iso(), by: T.ownerId, what: 'approved, sent to godown' }] })),
+      ch('orders', 'oother', o({ salesmanId: 'someone-else' })),
+    ])).body.rejected).toEqual([]);
+    G.t = (await post('/v1/login', { phone: '9700000099', pin: '3804' }, undefined, freshIp())).body.token;
+  });
+  it('a salesman books in his own name, as new, at the product rate (lower only with his reason), no Disc %', async () => {
+    expect((await sync(T.salesman, [ch('orders', 'on1', o())])).body.rejected).toEqual([]);
+    const cases: [string, Record<string, unknown>, string][] = [
+      ['on2', o({ salesmanId: 'someone-else' }), 'an order is booked in your own name'],
+      ['on3', o({ status: 'approved' }), 'a new order waits for the owner'],
+      ['on4', o({ approvedBy: 'st-salesman' }), "order field approvedBy is the owner's"],
+      ['on5', o({ lines: [{ productId: 'pr1', qty: 2, rate: 40 }] }), "order rate must be the product's rate"],
+      ['on6', o({ lines: [{ productId: 'pr1', qty: 2, rate: 60 }], rateRemark: 'x' }), "order rate must be the product's rate"],
+      ['on7', o({ lines: [{ productId: 'pr1', qty: 2, rate: 50, discountPct: 5 }] }), "Disc % is the owner's"],
+      ['on8', o({ source: 'company' }), 'a company order comes only through the company link'],
+    ];
+    for (const [id, d, why] of cases) {
+      const r = await sync(T.salesman, [ch('orders', id, d)]);
+      expect(r.body.rejected, id).toEqual([`orders|${id}`]);
+      expect(r.body.reasons?.[`orders|${id}`], id).toBe(why);
+    }
+    expect((await sync(T.salesman, [ch('orders', 'on9', o({ lines: [{ productId: 'pr1', qty: 2, rate: 45 }], rateRemark: 'Tea @45 — big shop' }))])).body.rejected).toEqual([]);
+  });
+  it('a salesman changes or cancels only his own new order; never an approved one or another person\'s', async () => {
+    const mine = await doc('orders', 'on1');
+    expect((await sync(T.salesman, [{ table: 'orders', id: 'on1', updatedAt: iso(1000), data: { ...mine, lines: [{ productId: 'pr1', qty: 5, rate: 50, line: 1 }] } }])).body.rejected).toEqual([]);
+    const other = await doc('orders', 'oother');
+    const r = await sync(T.salesman, [{ table: 'orders', id: 'oother', updatedAt: iso(1000), data: { ...other, status: 'cancelled' } }]);
+    expect(r.body.reasons?.['orders|oother']).toBe('a salesman changes only his own orders');
+    const a = await doc('orders', 'oa');
+    for (const d of [{ ...a, lines: [{ productId: 'pr1', qty: 9, rate: 50, line: 1 }] }, { ...a, status: 'cancelled' }, { ...a, approvedBy: 'st-salesman' }])
+      expect((await sync(T.salesman, [{ table: 'orders', id: 'oa', updatedAt: iso(1100), data: d }])).body.rejected).toEqual(['orders|oa']);
+    expect((await sync(T.salesman, [{ table: 'orders', id: 'on1', updatedAt: iso(1200), data: { ...(await doc('orders', 'on1')), status: 'cancelled', issues: ['Cancelled by salesman'] } }])).body.rejected).toEqual([]);
+  });
+  it('the godown packs an approved order and nothing more; nobody else approves or bills', async () => {
+    const a = await doc('orders', 'oa');
+    const pick = { ...a, status: 'picked', picked: [{ productId: 'pr1', qty: 2, line: 1 }], pickedBy: 'st-godown', pickedAt: iso() };
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1300), data: { ...pick, status: 'billed' } }])).body.rejected).toEqual(['orders|oa']);
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1300), data: { ...pick, lines: [{ productId: 'pr1', qty: 2, rate: 1, line: 1 }] } }])).body.rejected).toEqual(['orders|oa']);
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1300), data: { ...pick, pickedBy: 'st-salesman' } }])).body.rejected).toEqual(['orders|oa']);
+    expect((await sync(G.t, [{ table: 'orders', id: 'on9', updatedAt: iso(1300), data: { ...(await doc('orders', 'on9')), status: 'approved' } }])).body.rejected).toEqual(['orders|on9']);
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1400), data: pick }])).body.rejected).toEqual([]);
+    expect((await doc('orders', 'oa')).status).toBe('picked');
+  });
+  it('order history only grows, and new entries carry the signed-in person', async () => {
+    const a = await doc('orders', 'oa');
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1500), data: { ...a, activity: [] } }])).body.reasons?.['orders|oa']).toBe('order history only grows');
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1500), data: { ...a, activity: [{ ...a.activity[0], what: 'rewritten' }] } }])).body.rejected).toEqual(['orders|oa']);
+    expect((await sync(G.t, [{ table: 'orders', id: 'oa', updatedAt: iso(1600), data: { ...a, activity: [...a.activity, { at: iso(), by: T.ownerId, what: 'owner said ok' }] } }])).body.rejected).toEqual([]);
+    expect((await doc('orders', 'oa')).activity[1].by).toBe('st-godown');
+  });
+  it('lines the books never take, through the sync, with the reason back to the phone', async () => {
+    const bad: [string, Record<string, unknown>, string][] = [
+      ['ob1', o({ lines: [{ productId: 'pr1', qty: 1, rate: 50, discountPct: 101 }] }), 'Disc % must be 0 to 100'],
+      ['ob2', o({ lines: [{ productId: 'pr1', qty: 1, rate: 50, discountPct: -1 }] }), 'Disc % must be 0 to 100'],
+      ['ob3', o({ source: 'company', lines: [{ productId: 'pr1', qty: 1, rate: 50 }, { productId: 'pr1', qty: 2, rate: 50 }] }), 'a company order has each product once'],
+      ['ob4', o({ lines: [{ productId: 'pr1', qty: 1, rate: 50, line: 1 }, { productId: 'pr2', qty: 1, rate: 80, line: 1 }] }), 'two order lines have the same line number'],
+    ];
+    for (const [id, d, why] of bad) {
+      const r = await sync(T.owner, [ch('orders', id, d)]);
+      expect(r.body.rejected, id).toEqual([`orders|${id}`]);
+      expect(r.body.reasons?.[`orders|${id}`], id).toBe(why);
+    }
+    expect((await sync(T.owner, [ch('orders', 'ob5', o({ lines: [{ productId: 'pr1', qty: 1, rate: 50, discountPct: 100 }] }))])).body.rejected).toEqual([]);
+    // a bill line without pieces still never carries a bad Disc %
+    const inv = bill(await billNo(T.owner), [100]);
+    const noQty = { ...inv, lines: inv.lines.map(l => { const { qty: _q, ...rest } = l; void _q; return { ...rest, discountPct: 500 }; }) };
+    const r = await sync(T.owner, [ch('invoices', 'inv-noqty', noQty)]);
+    expect(r.body.rejected).toEqual(['invoices|inv-noqty']);
+    expect(r.body.reasons?.['invoices|inv-noqty']).toBe('Disc % must be 0 to 100');
+  });
+  it('a company rep pushes only his own orders, at the product rate', async () => {
+    const co = await post('/v1/signup', { consent: CONSENT, firmName: 'Brand Two', ownerName: 'HO', phone: '9700000080', pin: '482613', kind: 'company' }, undefined, freshIp());
+    expect((await sync(co.body.token, [ch('products', 'cP1', { name: 'Oil', rate: 100 }), ch('staff', 'crep1', { name: 'Rep A', phone: '9700000081', role: 'rep', pin: '6153', active: true }),
+      ch('orders', 'co-other', { shopId: 'x', repId: 'crep2', source: 'company', lines: [{ productId: 'cP1', qty: 1, rate: 100 }], status: 'new', issues: [], date: today(), invoiceIds: [] })])).body.rejected).toEqual([]);
+    const rep = (await post('/v1/login', { phone: '9700000081', pin: '6153' }, undefined, freshIp())).body.token;
+    const ord = (x: Record<string, unknown>) => ({ shopId: 'x', repId: 'crep1', source: 'company', lines: [{ productId: 'cP1', qty: 1, rate: 100 }], status: 'new', issues: [], date: today(), invoiceIds: [], ...x });
+    expect((await sync(rep, [ch('orders', 'co-1', ord({}))])).body.rejected).toEqual([]);
+    expect((await sync(rep, [ch('orders', 'co-2', ord({ repId: 'crep2' }))])).body.rejected).toEqual(['orders|co-2']);
+    expect((await sync(rep, [ch('orders', 'co-other', ord({ repId: 'crep1' }), 1000)])).body.rejected).toEqual(['orders|co-other']);
+    expect((await sync(rep, [ch('orders', 'co-3', ord({ lines: [{ productId: 'cP1', qty: 1, rate: 10 }] }))])).body.rejected).toEqual(['orders|co-3']);
+  });
+  it('van numbers are unique among vans in use (server too); a stock movement is capped', async () => {
+    expect((await sync(T.owner, [ch('vans', 'van-a', { name: 'Van 1', number: 'TN 31 AB 1234', kind: 'own' })])).body.rejected).toEqual([]);
+    const r = await sync(T.owner, [ch('vans', 'van-b', { name: 'Van 2', number: 'tn31ab-1234', kind: 'own' })]);
+    expect(r.body.rejected).toEqual(['vans|van-b']);
+    expect(r.body.reasons?.['vans|van-b']).toBe('this van number is already used by another van');
+    expect((await sync(T.owner, [ch('vans', 'van-c', { name: 'Old van', number: 'TN31AB1234', kind: 'own', active: false })])).body.rejected).toEqual([]);
+    expect((await sync(T.owner, [ch('stockMoves', 'mv-huge', { batchId: 'b1', productId: 'p1', delta: 2_000_000, at: iso() })])).body.rejected).toEqual(['stockMoves|mv-huge']);
   });
 });

@@ -57,12 +57,7 @@ export function distributorRule(role: string, userId: string, table: string, dat
     }
     return null;
   }
-  if (table === 'orders' && existing) {
-    const a = ORDER_RANK[String(existing.status)] ?? 0, b = ORDER_RANK[String(data.status)] ?? 0;
-    if (b < a) return 'an order never goes back';
-    if (a === 3 && data.status !== existing.status) return 'a billed or cancelled order is final';
-    return null;
-  }
+  if (table === 'orders') return orderRule(role, userId, data, existing);
   if (table === 'payments') {
     if (!existing) return data.settled ? 'only the owner or office settles a payment' : !['ok', 'waiting_shop', undefined].includes(data.status as string) ? 'only the owner or office sets a payment status' : null;
     if (String(existing.collectedBy) !== userId) return 'a payment is changed only by the person who took it';
@@ -86,6 +81,80 @@ export function distributorRule(role: string, userId: string, table: string, dat
       else if (!same(data[k], existing[k])) return 'only the owner or office decides';
     }
     return null;
+  }
+  return null;
+}
+
+/** what a staff phone (not owner/office) may do to an order (security round, Part 2 batch 1):
+ *  - a salesman books orders in his own name only (status new, nothing approved, no owner edits on it), and changes or
+ *    cancels only his own order while it is still new;
+ *  - the godown packs an approved order (status → picked, picked rows, pickedBy = itself);
+ *  - nobody else approves, bills or cancels; lines, the salesman's original, approvals, who edited and the source are the
+ *    owner's; picked / issues / invoiceIds are the only other fields that move; the activity log only grows.
+ *  Rates and Disc % on new or changed lines are checked separately (orderRates, needs the product list). */
+const ORDER_OPEN = new Set(['picked', 'issues', 'invoiceIds', 'pickedBy', 'pickedAt']);
+export function orderRule(role: string, userId: string, data: Doc, existing: Doc | undefined): string | null {
+  if (role === 'owner' || role === 'office') return null;
+  if (data.source === 'company' && !existing) return 'a company order comes only through the company link';
+  if (!existing) {
+    if (role !== 'salesman') return 'only a salesman books an order from his phone';
+    if (data.salesmanId !== userId) return 'an order is booked in your own name';
+    if (data.status !== 'new' && data.status !== 'needs_ok') return 'a new order waits for the owner';
+    for (const k of ['approvedBy', 'approvedAt', 'original', 'editedBy', 'editedAt', 'picked', 'pickedBy', 'pickedAt']) if (data[k] != null) return `order field ${k} is the owner's`;
+    if (Array.isArray(data.invoiceIds) && data.invoiceIds.length) return 'order field invoiceIds is the owner\'s';
+    const act = Array.isArray(data.activity) ? data.activity as Doc[] : [];
+    if (act.some(a => !a || a.by !== userId)) return 'order history is written in your own name';
+    return null;
+  }
+  const a = ORDER_RANK[String(existing.status)] ?? 0, b = ORDER_RANK[String(data.status)] ?? 0;
+  if (b < a) return 'an order never goes back';
+  if (a === 3 && data.status !== existing.status) return 'a billed or cancelled order is final';
+  const mine = role === 'salesman' && existing.salesmanId === userId;
+  if (role === 'salesman' && !mine) return 'a salesman changes only his own orders';
+  if (data.status !== existing.status) {
+    const pack = role === 'godown' && existing.status === 'approved' && data.status === 'picked';
+    const cancelOwn = mine && existing.status === 'new' && data.status === 'cancelled';
+    if (!pack && !cancelOwn) return 'only the owner or office approves, bills or cancels an order';
+  }
+  const own = mine && existing.status === 'new'; // his own order, not approved yet: he may still change its lines
+  if (!activityGrows(data.activity, existing.activity)) return 'order history only grows';
+  for (const k of new Set([...Object.keys(data), ...Object.keys(existing)])) {
+    if (META.has(k) || k === 'status' || k === 'activity' || ORDER_OPEN.has(k)) continue;
+    if (k === 'lines') { if (!own && !same(linesNoLots(data.lines), linesNoLots(existing.lines))) return 'order lines are the owner\'s'; continue; }
+    if (own && (k === 'rateRemark')) continue;
+    if (!same(data[k], existing[k])) return `order field ${k} is the owner's`;
+  }
+  if ((!same(data.picked, existing.picked) || !same(data.pickedBy, existing.pickedBy) || !same(data.pickedAt, existing.pickedAt))
+    && !(role === 'godown' && existing.status === 'approved' && data.status === 'picked' && data.pickedBy === userId)) return 'only the godown packs an order';
+  return null;
+}
+/** a log that only grows: the stored entries are the first entries of the new copy, unchanged */
+export function activityGrows(mine: unknown, had: unknown): boolean {
+  const n = Array.isArray(mine) ? mine : [], o = Array.isArray(had) ? had : [];
+  return n.length >= o.length && o.every((x, i) => same(x, n[i]));
+}
+/** new history entries carry the signed-in person (the token), whatever the phone wrote in them */
+export function stampActivity(userId: string, data: Doc, existing: Doc | undefined): Doc {
+  const n = Array.isArray(data.activity) ? data.activity as Doc[] : null, o = Array.isArray(existing?.activity) ? existing!.activity as unknown[] : [];
+  if (!n || n.length <= o.length || !activityGrows(n, o)) return data;
+  return { ...data, activity: n.map((x, i) => i < o.length || !x || typeof x !== 'object' ? x : { ...x, by: userId }) };
+}
+/** rates on a staff phone's new or changed order lines: the product's own rate (a lower rate only with the salesman's
+ *  written reason — the owner decides it at approval, rateRemark), never above it; no Disc % (the owner's). A line the
+ *  stored copy already had (same product, rate and Disc %) is not checked again. */
+export function orderRates(role: string, data: Doc, existing: Doc | undefined, rateOf: (productId: string) => number | undefined): string | null {
+  if (role === 'owner' || role === 'office') return null;
+  const had = (Array.isArray(existing?.lines) ? existing!.lines as Doc[] : []).map(l => `${l?.productId}|${l?.rate}|${l?.discountPct ?? 0}`);
+  for (const l of Array.isArray(data.lines) ? data.lines as Doc[] : []) {
+    if (!l || typeof l !== 'object') continue;
+    if (had.includes(`${l.productId}|${l.rate}|${l.discountPct ?? 0}`)) continue;
+    if (l.discountPct != null && l.discountPct !== 0) return 'Disc % is the owner\'s';
+    const std = rateOf(String(l.productId));
+    if (std === undefined) return 'an order line needs a product of this firm';
+    const r = Number(l.rate);
+    if (Math.abs(r - std) <= 0.001) continue;
+    if (r < std && String(data.rateRemark ?? '').trim()) continue;
+    return 'order rate must be the product\'s rate';
   }
   return null;
 }
@@ -152,11 +221,13 @@ export function badLines(table: string, d: Doc): string | null {
     const lines = Array.isArray(d.lines) ? d.lines as Doc[] : [];
     // the same product on two lines: sales bills and our own orders only, never a company's order (Part 2)
     if (table === 'orders' && d.source === 'company' && new Set(lines.map(l => String(l?.productId))).size !== lines.length) return 'a company order has each product once';
+    const nums = lines.map(l => l?.line).filter(n => n != null);
+    if (table === 'orders' && new Set(nums.map(String)).size !== nums.length) return 'two order lines have the same line number';
     for (const l of lines) {
       if (!l || typeof l !== 'object') return 'a line is not valid';
+      if (l.discountPct != null && !(typeof l.discountPct === 'number' && Number.isFinite(l.discountPct) && l.discountPct >= 0 && l.discountPct <= 100)) return 'Disc % must be 0 to 100';
       if (table === 'invoices' && l.qty === undefined) continue; // a bill line without pieces (old or partial record) is the bill's own checks
       if (!Number.isInteger(l.qty) || (l.qty as number) < 0 || (table === 'orders' && (l.qty as number) <= 0)) return 'quantity must be whole pieces';
-      if (l.discountPct != null && !(typeof l.discountPct === 'number' && Number.isFinite(l.discountPct) && l.discountPct >= 0 && l.discountPct <= 100)) return 'Disc % must be 0 to 100';
       if (((l.qty as number) > 0 || table === 'orders') && !(typeof l.rate === 'number' && Number.isFinite(l.rate) && l.rate > 0)) return 'rate must be more than 0';
     }
   }
@@ -186,9 +257,12 @@ export function billLotsOk(d: Doc): boolean {
 }
 
 /** a stock movement as a phone sends it: a lot, and a whole number of pieces in (+) or out (−), never 0 */
+export const MOVE_MAX = 1_000_000; // pieces in one movement: more is a typo or an attack, never a real day's stock
 export function badMove(d: Doc): boolean {
-  return typeof d.batchId !== 'string' || !d.batchId || !Number.isInteger(d.delta) || d.delta === 0;
+  return typeof d.batchId !== 'string' || !d.batchId || !Number.isInteger(d.delta) || d.delta === 0 || Math.abs(d.delta as number) > MOVE_MAX;
 }
+/** a van number compared without spaces, dashes or case (the app's vanKey) */
+export const vanKey = (n: unknown) => String(n ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 // ---------------------------------------------------------------- staff privacy (what a person downloads)
 /** records only their own person may download: role → table → the field naming that person */

@@ -7,7 +7,7 @@ import { config, rates } from './config.js';
 import { hashPin, pinFits, pinLength, readToken, signToken, verifyPin, type Claims } from './auth.js';
 import { logEvent, phoneMark, rotateLog, type SecEvent } from './seclog.js';
 import { addConsent, CONSENT_KINDS, consentsOf, DUE_DAYS, eraseSubject, exportPerson, firmConsent, grievance, PRIVACY_VERSION, retention } from './privacy.js';
-import { badLines, badMoney, badMove, billAddsUp, billLotsOk, cleanText, creditNoteRoom, distributorRule, keepCreditLimit, keepDeliveryResult, keepLineNumbers, keepOwnerOnly, mayDownload, numberIssued, OWN_ROWS, weakPin } from './rules.js';
+import { badLines, badMoney, badMove, billAddsUp, billLotsOk, cleanText, creditNoteRoom, distributorRule, orderRates, stampActivity, vanKey, keepCreditLimit, keepDeliveryResult, keepLineNumbers, keepOwnerOnly, mayDownload, numberIssued, OWN_ROWS, weakPin } from './rules.js';
 import { clearHits, hit, isLocked, tooMany } from './limits.js';
 import { scanWithAI, type ScanKind } from './scan.js';
 import { BIG_TABLES, companyDocs, companyReport, scopeFor } from './reports.js';
@@ -202,6 +202,8 @@ export async function buildApp(pool: pg.Pool, opts: { owner?: pg.Pool } = {}) {
     const canWrite = new Set(WRITE[c.r] ?? []);
     const accepted: string[] = [];
     const rejected: string[] = [];
+    // why a record was refused, in plain words the phone shows (only for the rules a person can act on)
+    const reasons: Record<string, string> = {};
     let freshToken: string | null = null;
     // the server's own copy of every refused or ignored record goes back, so the phone corrects itself
     const current: { table: string; id: string; updatedAt: string; data: Record<string, unknown> }[] = [];
@@ -234,7 +236,7 @@ export async function buildApp(pool: pg.Pool, opts: { owner?: pg.Pool } = {}) {
       const last = new Map<string, number>(); changes.forEach((ch, i) => { const k = `${ch?.table}|${ch?.id}`; const j = last.get(k); if (j === undefined || String(changes[j].updatedAt) <= String(ch.updatedAt)) last.set(k, i); });
       const now = Date.now();
       const rows: { table: string; id: string; data: string; up: string }[] = [];
-      const refuse = (key: string) => { rejected.push(key); };
+      const refuse = (key: string, why?: string | null) => { rejected.push(key); if (why) reasons[key] = why; };
       // too big, or a clock running ahead: not about the rules, so the phone keeps its own copy (held, tried again later —
       // a clock a few minutes fast goes through once real time catches up) instead of being given the server's copy
       const keepTheirs = new Set<string>();
@@ -266,9 +268,28 @@ export async function buildApp(pool: pg.Pool, opts: { owner?: pg.Pool } = {}) {
         }
         // every money amount is a real number, whoever sends it (a NaN or text never reaches the books)
         if (badMoney(ch.table, data)) { refuse(key); continue; }
+        // a company rep writes only his own orders, at the product's rate (pushed, not only downloaded)
+        if (kind === 'company' && ch.table === 'orders' && c.r === 'rep') {
+          const why = data.repId !== c.u || (ex && ex.repId !== c.u) ? 'a rep changes only his own orders'
+            : orderRates(c.r, data, ex, await productRates(client, c.t, data));
+          if (why) { refuse(key, why); continue; }
+        }
         if (kind === 'distributor') {
-          if (distributorRule(c.r, c.u, ch.table, data, ex)) { refuse(key); continue; }
-          if (badLines(ch.table, data)) { refuse(key); continue; }
+          const no = distributorRule(c.r, c.u, ch.table, data, ex) ?? badLines(ch.table, data);
+          if (no) { refuse(key, no); continue; }
+          if (ch.table === 'orders' && c.r !== 'owner' && c.r !== 'office') {
+            const why = orderRates(c.r, data, ex, await productRates(client, c.t, data));
+            if (why) { refuse(key, why); continue; }
+          }
+          // a van number belongs to one van in use (the app's guard, held here too)
+          if (ch.table === 'vans' && data.active !== false && vanKey(data.number)) {
+            const k = vanKey(data.number);
+            const pushed = rows.filter(r => r.table === 'vans' && r.id !== ch.id).map(r => JSON.parse(r.data) as Record<string, unknown>);
+            const twin = pushed.some(v => v.active !== false && vanKey(v.number) === k)
+              || (await client.query(`SELECT 1 FROM docs WHERE tenant_id=$1 AND tbl='vans' AND id <> ALL($2::text[]) AND COALESCE(data->>'active','true') <> 'false' AND upper(regexp_replace(COALESCE(data->>'number',''), '[^A-Za-z0-9]', '', 'g'))=$3 LIMIT 1`,
+                [c.t, [ch.id, ...pushed.map(v => String(v.id))], k])).rowCount;
+            if (twin) { refuse(key, 'this van number is already used by another van'); continue; }
+          }
           if (ch.table === 'invoices' && (!billAddsUp(data) || !billLotsOk(data))) { refuse(key); continue; }
           // a bill's credit notes together never come to more than it charged (the bill and earlier notes, here or in this push)
           if (ch.table === 'creditNotes') {
@@ -293,7 +314,7 @@ export async function buildApp(pool: pg.Pool, opts: { owner?: pg.Pool } = {}) {
           if (ch.table === 'products') data = keepCompanyFields(data as never, ex as never);
           // an owner or office copy made before the driver's delivery result never wipes it
           if (ch.table === 'invoices') data = keepDeliveryResult(c.r, data, ex);
-          if (ch.table === 'orders') data = keepLineNumbers(data, ex); // an older phone never wipes order line numbers
+          if (ch.table === 'orders') data = stampActivity(c.u, keepLineNumbers(data, ex), ex); // an older phone never wipes order line numbers; history in the signed-in name
           if (ch.table === 'shops') data = keepCreditLimit(c.r, data, ex);
         }
         data = keepOwnerOnly(c.r, OWNER_ONLY[ch.table], data, ex);
@@ -432,7 +453,7 @@ export async function buildApp(pool: pg.Pool, opts: { owner?: pg.Pool } = {}) {
       cursor: maxVersion,
       licence: await licenceFor(c.t), // every sync renews the phone's licence
       more: rows.length === config.pullLimit || cut,
-      accepted, rejected, current,
+      accepted, rejected, current, ...(Object.keys(reasons).length ? { reasons } : {}),
       ...(freshToken ? { token: freshToken } : {}),
       // owner-only fields (purchase rate) never reach anyone but the owner
       changes: rows.map(r => ({ table: r.tbl, id: r.id, updatedAt: new Date(r.updated_at).toISOString(), data: forRole(c.r, r.tbl, r.data) })),
@@ -957,4 +978,14 @@ async function upsertStaffLogin(client: pg.PoolClient, tenantId: string, s: Reco
   const change = byId.active && s.active === false ? 'remove' as const
     : pinChanged || byId.phone !== phone || byId.role !== role || (!byId.active && s.active !== false) ? 'change' as const : undefined;
   return { ok: true, epoch: Number(r.rows[0].token_epoch), change, pinChanged };
+}
+
+/** the stored rate of every product on an order's lines (one query), for the staff-phone rate check */
+async function productRates(client: pg.PoolClient, tenantId: string, order: Record<string, unknown>): Promise<(id: string) => number | undefined> {
+  const ids = [...new Set((Array.isArray(order.lines) ? order.lines as Record<string, unknown>[] : []).map(l => String(l?.productId ?? '')))];
+  const rates = new Map<string, number>();
+  if (ids.length) for (const r of (await client.query(`SELECT id, data->>'rate' AS rate FROM docs WHERE tenant_id=$1 AND tbl='products' AND id = ANY($2)`, [tenantId, ids])).rows) {
+    const n = Number(r.rate); if (r.rate != null && Number.isFinite(n)) rates.set(r.id, n);
+  }
+  return id => rates.get(id);
 }

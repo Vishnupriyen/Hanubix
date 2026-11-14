@@ -49,6 +49,22 @@ describe('every change of a lot is a movement, in the same save', () => {
     expect(await db.stockMoves.count()).toBe(3);
   });
 
+  it('two NEW bills in one save sharing a lot: one movement for both (its id names the last bill), never counted twice', async () => {
+    const b = await newLot(100);
+    const bill = (n: string, q: number) => ({ number: n, lines: [{ productId: 'p1', qty: q, freeQty: 0, batches: [{ batchId: b.id, batch: 'B1', qty: q, expiry: '2099-12-31' }] }], total: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, roundOff: 0, deliveryStatus: 'pending' });
+    const cs = new ChangeSet();
+    cs.put('batches', { ...b, qty: 97 }, 'stock out'); cs.put('invoices', bill('X/1', 3), 'bill made');
+    cs.put('batches', { ...b, qty: 93 }, 'stock out'); const second = cs.put('invoices', bill('X/2', 4), 'bill made');
+    await cs.commit('Billed two');
+    const out = (await db.stockMoves.where('batchId').equals(b.id).toArray()).filter(m => m.delta < 0);
+    expect(out.map(m => [m.id, m.delta])).toEqual([[`mv:${second.id}:${b.id}`, -7]]);
+    expect(await sum(b.id)).toBe(93); expect((await db.batches.get(b.id))!.qty).toBe(93);
+    // the same save tapped again (bills already there, lot unchanged): no second movement
+    const again = new ChangeSet(); again.put('batches', { ...(await db.batches.get(b.id))! }, 'stock out'); again.put('invoices', { ...(await db.invoices.get(second.id))! }, 'bill made');
+    await again.commit('Billed two');
+    expect(await sum(b.id)).toBe(93);
+  });
+
   it('a lot changed twice in one save: one movement for the whole change', async () => {
     const b = await newLot(50);
     const cs = new ChangeSet(); cs.put('batches', { ...b, qty: 45 }, 'a'); cs.put('batches', { ...b, qty: 41 }, 'b'); await cs.commit('Two');

@@ -349,7 +349,7 @@ async function syncOnce(): Promise<{ msg: string; more: boolean }> {
     if (r.status === 401 || r.status === 403) { localStorage.removeItem('dbrox.session'); window.dispatchEvent(new Event('dbrox:logout')); return done('Please log in again. Anything not yet sent stays on this phone.'); }
     if (!r.ok) return done(`Sync failed (${r.status}). Data is safe on this phone; will retry.`);
     await touchServer(); // the phone reached the server: the 14-day offline clock starts again
-    const res: { cursor: number; changes: Change[]; accepted: string[]; rejected?: string[]; current?: Change[]; more?: boolean; licence?: string; token?: string } = await r.json();
+    const res: { cursor: number; changes: Change[]; accepted: string[]; rejected?: string[]; reasons?: Record<string, string>; current?: Change[]; more?: boolean; licence?: string; token?: string } = await r.json();
     if (res.token) await setToken(res.token); // renewed before it runs out
     await saveLicence(res.licence); // every sync renews the licence
     const accepted = new Set(res.accepted);
@@ -378,7 +378,10 @@ async function syncOnce(): Promise<{ msg: string; more: boolean }> {
     await db.meta.put({ key: 'held', value: [...held] });
     // keep going while the server has more for us, or this phone had more waiting than one request carries
     const morePush = full && accepted.size > 0;
-    const heldMsg = held.size ? ` ${held.size} held: not accepted by the server, kept on this phone.` : '';
+    // the server's plain reason (when it gives one) for the records refused in this push, so the person can fix them
+    const why = [...new Set(changes.map(c => res.reasons?.[`${c.table}|${c.id}`]).filter((x): x is string => !!x))];
+    const whyMsg = why.length ? ` (${why.slice(0, 3).join('; ')})` : '';
+    const heldMsg = held.size ? ` ${held.size} held: not accepted by the server${whyMsg}, kept on this phone.` : why.length ? ` Not accepted by the server${whyMsg}; the server's copy is back on this phone.` : '';
     return done(`Synced: sent ${accepted.size}, received ${res.changes.length}.${heldMsg}`, !!res.more || morePush);
   } catch (e) {
     return done(`Sync paused: ${(e as Error).message}. Data is safe on this phone.`);

@@ -74,6 +74,10 @@ describe('vans: delete or hide', () => {
     expect((await activeVans()).some(x => x.id === v.id)).toBe(false);
     // its number is free again for a new active van
     await saveVan({ name: 'Van H2', number: 'TN 31 HH 1', kind: 'own' });
+    // editing the hidden van (its name, for old reports) keeps it hidden — it never comes back with a number in use
+    const edited = await saveVan({ id: v.id, name: 'Van H (old)', number: 'TN 31 HH 1', kind: 'hired' });
+    expect(edited.active).toBe(false);
+    expect((await activeVans()).filter(x => x.number === 'TN 31 HH 1').map(x => x.name)).toEqual(['Van H2']);
   });
   it('removing twice is safe', async () => {
     const v = await saveVan({ name: 'Van T', number: 'TN 31 T 1', kind: 'own' });
