@@ -3,11 +3,11 @@
 // → load → trip out (live track) → delivered/photo → collect → day close (reconciliation)
 import { ChangeSet, db, getSettings, nowIso, session, today, daysFrom, ymd } from './db';
 import { billTotals, checkOrder, makeInvoices, pickBatches, priceLines, refreshSchemeClaims, type BillCut } from './billing';
-import { invoiceBalances, paymentCounts, r2 } from './ledger';
+import { invoiceBalances, OWED, paymentCounts, r2 } from './ledger';
 import { nextNumbers } from './sync';
 import { locationAllowed } from './privacy';
 import { billChangeBlock, isInterState } from './gst';
-import { buildCreditNote, costValue, extraBill, lineRoom, makeCreditNote, splitShort } from './credit';
+import { buildCreditNote, costValue, extraBill, lineRoom, makeCreditNote, otherQty, splitShort } from './credit';
 import { lineOf, orderLineFor, pickedLines, shortageLines } from './lines';
 import type { ClaimEntry, Invoice, InvoiceLine, Order, OrderLine, Role, Shop, Trip, Van } from './types';
 
@@ -94,7 +94,7 @@ export async function approveOrder(orderId: string) {
 // Shop history strip for the approval screen: bills pending, oldest days, rupees, limit.
 export async function shopHistory(shopId: string) {
   const { invoiceBalances } = await import('./ledger');
-  const bal = (await invoiceBalances(shopId)).filter(b => b.balance > 0.5);
+  const bal = (await invoiceBalances(shopId)).filter(b => b.balance > OWED);
   const shop = (await db.shops.get(shopId))!;
   return { bills: bal.length, amount: r2(bal.reduce((a, b) => a + b.balance, 0)), oldestDays: Math.max(0, ...bal.map(b => Math.floor((Date.now() - new Date(b.invoice.date).getTime()) / 86400000))), limit: shop.creditLimit, days: shop.creditDays };
 }
@@ -453,7 +453,7 @@ export async function settleDifference(invoiceId: string, action: 'modified' | '
   const at = shortageLines(inv);
   const items = sh.map((x, k) => {
     const l = inv.lines[at[k]];
-    const split = x.paid != null ? { paid: x.paid, free: x.free ?? 0 } : l ? splitShort(l, x.qty, products.get(x.productId), schemes, inv.date) : { paid: 0, free: 0 };
+    const split = x.paid != null ? { paid: x.paid, free: x.free ?? 0 } : l ? splitShort(l, x.qty, products.get(x.productId), schemes, inv.date, otherQty(inv.lines, at[k])) : { paid: 0, free: 0 };
     return { productId: x.productId, line: at[k] >= 0 ? at[k] : undefined, ...split, restock: !!DELIVERY_REASONS.find(r => r.label === x.reason)?.restock };
   }).filter(x => x.paid || x.free);
   if (items.length) await makeCreditNote(cs, work, items, { reason: 'Short at delivery', source: 'delivery', takeOffBill: false });
@@ -469,7 +469,7 @@ export async function differenceMoney(inv: Invoice) {
   const at = shortageLines(inv);
   const items = (inv.delivery?.shortages ?? []).map((x, k) => {
     const l = inv.lines[at[k]];
-    const split = x.paid != null ? { paid: x.paid, free: x.free ?? 0 } : l ? splitShort(l, x.qty, products.get(x.productId), schemes, inv.date) : { paid: 0, free: 0 };
+    const split = x.paid != null ? { paid: x.paid, free: x.free ?? 0 } : l ? splitShort(l, x.qty, products.get(x.productId), schemes, inv.date, otherQty(inv.lines, at[k])) : { paid: 0, free: 0 };
     return { productId: x.productId, line: at[k] >= 0 ? at[k] : undefined, ...split, restock: true };
   }).filter(x => x.paid || x.free);
   const back = items.length ? r2(buildCreditNote(inv, cns, items).total) : 0;
@@ -486,10 +486,10 @@ export async function pendingShortCredit(inv: Invoice) {
  *  knows will be credited (so the driver asks for the delivered value, not the full bill), with the shop's old dues as they are */
 export async function collectableBills(shopId: string) {
   const out: { invoice: Invoice; balance: number; short: number; due: number }[] = [];
-  for (const b of (await invoiceBalances(shopId)).filter(x => x.balance > 0.5)) {
+  for (const b of (await invoiceBalances(shopId)).filter(x => x.balance > OWED)) {
     const short = await pendingShortCredit(b.invoice);
     const due = r2(Math.max(0, b.balance - short));
-    if (due > 0.5) out.push({ invoice: b.invoice, balance: b.balance, short: r2(b.balance - due), due });
+    if (due > OWED) out.push({ invoice: b.invoice, balance: b.balance, short: r2(b.balance - due), due });
   }
   return out;
 }
@@ -595,7 +595,7 @@ export async function recordDelivery(invoiceIds: string[], input: DeliveryInput)
       if (qty <= 0) continue;
       const reason = DELIVERY_REASONS.find(r => r.value === s.reason) ?? DELIVERY_REASONS[0];
       // paid and scheme-free pieces are kept apart: the shop keeps the most paid pieces whose free pieces still fit
-      const full = splitShort(l, qty, products.get(l.productId), schemes, inv.date), open = room[li];
+      const full = splitShort(l, qty, products.get(l.productId), schemes, inv.date, otherQty(inv.lines, li)), open = room[li];
       const paid = Math.min(open.paid, Math.max(full.paid, qty - open.free));
       const split = { paid, free: Math.min(open.free, qty - paid) };
       shortages.push({ productId: l.productId, qty, reason: reason.label, ...split, line: li });

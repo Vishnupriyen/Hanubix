@@ -2,7 +2,8 @@ import { inr, showMonth, plural } from './i18n';
 // TESRAX Accounts + TESRAX Claim Prep outputs. Pure code: exact, repeatable, explainable.
 import { ChangeSet, db, getSettings, localDay } from './db';
 import { isB2B, r2 } from './ledger';
-import { cnTaxLines, shopStateCode, stateLabel, UQC } from './gst';
+import { cnTaxLines, shopStateCode, stateLabel, uqcLabel } from './gst';
+import { uqcOf } from './orderEdit';
 import { claimable } from './claims';
 import { downloadText, downloadWorkbook } from './readers';
 import type { Reply } from './engine';
@@ -140,8 +141,13 @@ export async function exportGstr1(month: string): Promise<Reply> {
   const b2cs = new Map<string, number>();
   type H = { desc: string; qty: number; value: number; taxable: number; igst: number; cgst: number; sgst: number; rate: number };
   const hsnB2B = new Map<string, H>(), hsnB2C = new Map<string, H>();
-  const hsnAdd = (m: Map<string, H>, hsn: string, rate: number, desc: string, sign: number, x: { qty: number; value: number; taxable: number; igst: number; cgst: number; sgst: number }) => {
-    const k = `${hsn}|${rate}`; const h = m.get(k) ?? { desc, qty: 0, value: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, rate };
+  // one row per HSN + UQC + rate — the same key as the bill's own HSN summary (gst.ts hsnSummary); the description is the
+  // first bill line of that key (a credit note brings its own line's name), never a line of another key
+  const products = new Map((await db.products.toArray()).map(p => [p.id, p]));
+  const unitOf = (pid: string) => uqcOf(products.get(pid));
+  const hsnAdd = (m: Map<string, H>, hsn: string, unit: string, rate: number, desc: string, sign: number, x: { qty: number; value: number; taxable: number; igst: number; cgst: number; sgst: number }) => {
+    const k = `${hsn}|${unit}|${rate}`; const h = m.get(k) ?? { desc, qty: 0, value: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, rate };
+    if (!h.desc && desc) h.desc = desc;
     h.qty += sign * x.qty; h.value = r2(h.value + sign * x.value); h.taxable = r2(h.taxable + sign * x.taxable);
     h.igst = r2(h.igst + sign * x.igst); h.cgst = r2(h.cgst + sign * x.cgst); h.sgst = r2(h.sgst + sign * x.sgst); m.set(k, h);
   };
@@ -149,7 +155,7 @@ export async function exportGstr1(month: string): Promise<Reply> {
     const byRate = new Map<number, number>();
     for (const l of i.lines) {
       byRate.set(l.gst, r2((byRate.get(l.gst) ?? 0) + l.taxable));
-      hsnAdd(i.kind === 'B2B' ? hsnB2B : hsnB2C, l.hsn, l.gst, l.name, 1, { qty: l.qty + l.freeQty, value: l.total, taxable: l.taxable, igst: l.igst, cgst: l.cgst, sgst: l.sgst });
+      hsnAdd(i.kind === 'B2B' ? hsnB2B : hsnB2C, l.hsn, unitOf(l.productId), l.gst, l.name, 1, { qty: l.qty + l.freeQty, value: l.total, taxable: l.taxable, igst: l.igst, cgst: l.cgst, sgst: l.sgst });
     }
     for (const [rate, taxable] of byRate) {
       const shop = shops.get(i.shopId);
@@ -164,8 +170,8 @@ export async function exportGstr1(month: string): Promise<Reply> {
     const inv = invById.get(c.invoiceId);
     const shop = shops.get(c.shopId);
     const b2bNote = inv ? inv.kind === 'B2B' : isB2B(shop ?? ({} as never));
-    const rows = cnTaxLines(c, inv);
-    for (const r of rows) hsnAdd(b2bNote ? hsnB2B : hsnB2C, r.hsn, r.gst, inv?.lines.find(l => l.hsn === r.hsn)?.name ?? '', -1, { qty: r.qty, value: r2(r.taxable + r.cgst + r.sgst + r.igst), taxable: r.taxable, igst: r.igst, cgst: r.cgst, sgst: r.sgst });
+    const rows = cnTaxLines(c, inv, unitOf);
+    for (const r of rows) hsnAdd(b2bNote ? hsnB2B : hsnB2C, r.hsn, r.unit, r.gst, r.name, -1, { qty: r.qty, value: r2(r.taxable + r.cgst + r.sgst + r.igst), taxable: r.taxable, igst: r.igst, cgst: r.cgst, sgst: r.sgst });
     const byRate = new Map<number, number>(); for (const r of rows) byRate.set(r.gst, r2((byRate.get(r.gst) ?? 0) + r.taxable));
     for (const [rate, taxable] of byRate) {
       if (b2bNote) cdnr.push([shop?.gstin ?? '', shop?.name ?? '', c.number, dmy(c.date), 'C', posOf(c.shopId), 'N', 'Regular B2B', c.total, '', rate, taxable, 0]);
@@ -182,7 +188,7 @@ export async function exportGstr1(month: string): Promise<Reply> {
   };
   docRows('Invoices for outward supply', monthAll);
   docRows('Credit Note', cns);
-  const hsnRows = (m: Map<string, H>) => [...m.entries()].filter(([, h]) => h.qty || h.taxable).map(([k, h]) => [k.split('|')[0], h.desc, `${UQC}-PIECES`, h.qty, h.value, h.rate, h.taxable, h.igst, h.cgst, h.sgst, 0]);
+  const hsnRows = (m: Map<string, H>) => [...m.entries()].filter(([, h]) => h.qty || h.taxable).map(([k, h]) => [k.split('|')[0], h.desc, uqcLabel(k.split('|')[1]), h.qty, h.value, h.rate, h.taxable, h.igst, h.cgst, h.sgst, 0]);
   const hsnHeader = ['HSN', 'Description', 'UQC', 'Total Quantity', 'Total Value', 'Rate', 'Taxable Value', 'Integrated Tax Amount', 'Central Tax Amount', 'State/UT Tax Amount', 'Cess Amount'];
   const sheets = [
     { name: 'b2b', header: ['GSTIN/UIN of Recipient', 'Receiver Name', 'Invoice Number', 'Invoice date', 'Invoice Value', 'Place Of Supply', 'Reverse Charge', 'Applicable % of Tax Rate', 'Invoice Type', 'E-Commerce GSTIN', 'Rate', 'Taxable Value', 'Cess Amount'], rows: b2b },
@@ -206,6 +212,8 @@ export async function exportGstr1(month: string): Promise<Reply> {
 // ---------------------------------------------------------------- e-invoice JSON (NIC schema 1.1, bulk upload)
 export async function exportEinvoice(month: string): Promise<Reply> {
   const s = await getSettings();
+  const products = new Map((await db.products.toArray()).map(p => [p.id, p]));
+  const unitOf = (pid: string) => uqcOf(products.get(pid)); // the product's GST unit (KGS, LTR …), PCS when it has none
   const shops = new Map((await db.shops.toArray()).map(x => [x.id, x]));
   const invs = (await db.invoices.toArray()).filter(i => inMonth(i.date, month) && !i.cancelled && i.kind === 'B2B');
   const pin = (addr?: string) => Number(addr?.match(/\b(6\d{5})\b/)?.[1] ?? 0);
@@ -221,7 +229,7 @@ export async function exportEinvoice(month: string): Promise<Reply> {
       SellerDtls: { Gstin: s.gstin, LglNm: s.firmName, Addr1: s.address.slice(0, 100), Loc: s.address.split(',').slice(-2, -1)[0]?.trim() || 'Tamil Nadu', Pin: sellerPin, Stcd: s.stateCode },
       BuyerDtls: { Gstin: shop.gstin, LglNm: shop.name, Pos: shop.gstin!.slice(0, 2), Addr1: (shop.address || shop.area).slice(0, 100), Loc: shop.area || 'NA', Pin: pin(shop.address), Stcd: shop.gstin!.slice(0, 2) },
       ItemList: i.lines.map((l, k) => ({
-        SlNo: String(k + 1), PrdDesc: l.name, IsServc: 'N', HsnCd: l.hsn, Qty: l.qty, FreeQty: l.freeQty, Unit: 'PCS',
+        SlNo: String(k + 1), PrdDesc: l.name, IsServc: 'N', HsnCd: l.hsn, Qty: l.qty, FreeQty: l.freeQty, Unit: unitOf(l.productId),
         UnitPrice: l.rate, TotAmt: l.gross, Discount: l.discount, AssAmt: l.taxable, GstRt: l.gst,
         IgstAmt: l.igst, CgstAmt: l.cgst, SgstAmt: l.sgst, TotItemVal: l.total,
       })),

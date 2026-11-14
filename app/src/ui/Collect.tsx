@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { PayBox } from './PayBox';
 import { ArrowLeft, Store } from 'lucide-react';
 import { activeShops } from '../core/db';
-import { allOutstanding } from '../core/ledger';
+import { allOutstanding, OWED } from '../core/ledger';
 import { norm } from '../core/match';
 import { inr, t } from '../core/i18n';
 import type { Shop } from '../core/types';
@@ -22,7 +22,7 @@ export function Collect() {
       const ss = (await activeShops()).filter(s => role !== 'salesman' || !s.salesmanId || s.salesmanId === me);
       const dues = await allOutstanding(); // one pass over the bills, not one per shop
       const withDue = ss.map(s => { const o = dues.get(s.id); return { ...s, due: o?.total ?? 0, overdue: o?.maxOverdueDays ?? 0 }; });
-      setShops(withDue.filter(s => s.due > 0.5).sort((a, b) => b.overdue - a.overdue || b.due - a.due));
+      setShops(withDue.filter(s => s.due > OWED).sort((a, b) => b.overdue - a.overdue || b.due - a.due));
     })();
   }, [tick]);
 

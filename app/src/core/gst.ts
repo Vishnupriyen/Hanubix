@@ -13,8 +13,12 @@ export const stateLabel = (code: string) => `${code}-${stateName(code)}`;
 export const DEFAULT_STATE = '33';
 /** GST rates in force (12% and 28% were removed in Sept 2025) */
 export const GST_RATES = [0, 0.25, 3, 5, 18, 40];
-/** unit of quantity printed on bills and filed in GSTR-1 */
+/** unit of quantity printed on bills and filed in GSTR-1 (a product without its own unit) */
 export const UQC = 'PCS';
+/** GSTR-1 writes the unit as CODE-NAME (the GST portal's UQC list); a code not in this list is filed as it is */
+const UQC_NAMES: Record<string, string> = { PCS: 'PIECES', NOS: 'NUMBERS', KGS: 'KILOGRAMS', GMS: 'GRAMMES', LTR: 'LITRES', MLT: 'MILILITRE', BOX: 'BOX',
+  BTL: 'BOTTLES', CTN: 'CARTONS', PAC: 'PACKS', DOZ: 'DOZENS', BAG: 'BAGS', TIN: 'TINS', SET: 'SETS', ROL: 'ROLLS', TBS: 'TABLETS', UNT: 'UNITS', OTH: 'OTHERS' };
+export const uqcLabel = (code: string) => { const c = (code || UQC).toUpperCase(); return UQC_NAMES[c] ? `${c}-${UQC_NAMES[c]}` : c; };
 
 /** the shop's state: from its GSTIN when it has one, else the state chosen on the shop form, else Tamil Nadu */
 export function shopStateCode(shop: Pick<Shop, 'gstin' | 'stateCode'> | undefined, _settings?: Pick<Settings, 'stateCode'>): string {
@@ -102,15 +106,15 @@ export function hsnSummary(lines: Pick<Invoice['lines'][number], 'hsn' | 'gst' |
   return [...rows.values()];
 }
 /** the money of a credit note per GST rate (and HSN), for GSTR-1, Tally and the printed note */
-export function cnTaxLines(c: Pick<CreditNote, 'lines'>, inv?: Pick<Invoice, 'lines'>) {
-  const rows = new Map<string, { hsn: string; gst: number; qty: number; taxable: number; cgst: number; sgst: number; igst: number }>();
+export function cnTaxLines(c: Pick<CreditNote, 'lines'>, inv?: Pick<Invoice, 'lines'>, unitOf: (productId: string) => string = () => UQC) {
+  const rows = new Map<string, { hsn: string; unit: string; gst: number; qty: number; taxable: number; cgst: number; sgst: number; igst: number; name: string }>();
   for (const cl of c.lines) {
     const l = inv?.lines[cl.line ?? -1]?.productId === cl.productId ? inv.lines[cl.line!] : inv?.lines.find(x => x.productId === cl.productId);
     const gst = cl.gst ?? l?.gst ?? 0, hsn = cl.hsn ?? l?.hsn ?? '';
     let t = { taxable: cl.taxable, cgst: cl.cgst, sgst: cl.sgst, igst: cl.igst };
     if (t.taxable == null) { const f = l?.total ? cl.amount / l.total : 0; t = l ? { taxable: r2(l.taxable * f), cgst: r2(l.cgst * f), sgst: r2(l.sgst * f), igst: r2(l.igst * f) } : { taxable: r2(cl.amount / (1 + gst / 100)), cgst: 0, sgst: 0, igst: 0 }; }
-    const k = `${hsn}|${gst}`;
-    const r = rows.get(k) ?? { hsn, gst, qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0 };
+    const unit = unitOf(cl.productId), k = `${hsn}|${unit}|${gst}`;
+    const r = rows.get(k) ?? { hsn, unit, gst, qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, name: l?.name ?? '' };
     r.qty += cl.qty + (cl.freeQty ?? 0); r.taxable = r2(r.taxable + (t.taxable ?? 0)); r.cgst = r2(r.cgst + (t.cgst ?? 0)); r.sgst = r2(r.sgst + (t.sgst ?? 0)); r.igst = r2(r.igst + (t.igst ?? 0));
     rows.set(k, r);
   }

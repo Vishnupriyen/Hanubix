@@ -3,7 +3,7 @@ import { Check, X, Phone, AlertTriangle, Landmark, MessageSquareText, Download, 
 import { ChangeSet, db, today, activeShops, ymd } from '../core/db';
 import { moneyPosition, profitAndLoss } from '../core/pnl';
 import { inr, showDate, showMonth, plural, showTime } from '../core/i18n';
-import { invoiceBalances, r2 } from '../core/ledger';
+import { invoiceBalances, OWED, r2 } from '../core/ledger';
 import { exportClaims, exportEinvoice, exportGstr1, exportTally } from '../core/exports';
 import { downloadWorkbook } from '../core/readers';
 import { ask, askText, confirmBox, notify } from './dialog';
@@ -21,9 +21,9 @@ export function Outstanding() {
   const [list, setRows] = useState<{ id: string; name: string; phone?: string; area: string; total: number; b0: number; b8: number; b16: number; b31: number; days: number; late: number; limit: number }[] | null>(null);
   const rows = list ?? [];
   useEffect(() => { (async () => {
-    const shops = await activeShops(); const bal = (await invoiceBalances()).filter(b => b.balance > 0.5);
+    const shops = await activeShops(); const bal = (await invoiceBalances()).filter(b => b.balance > OWED);
     const byShop = new Map<string, typeof bal>(); for (const b of bal) byShop.set(b.invoice.shopId, [...(byShop.get(b.invoice.shopId) ?? []), b]); // grouped once, not 1,200 searches
-    setRows(shops.map(s => { const mine = byShop.get(s.id) ?? []; const age = (b: typeof mine[0]) => Math.floor((Date.now() - new Date(b.invoice.date).getTime()) / 86400000); const sum = (f: (d: number) => boolean) => r2(mine.filter(b => f(age(b))).reduce((a, b) => a + b.balance, 0)); return { id: s.id, name: s.name, phone: s.phone, area: s.area, total: r2(mine.reduce((a, b) => a + b.balance, 0)), b0: sum(d => d <= 7), b8: sum(d => d > 7 && d <= 15), b16: sum(d => d > 15 && d <= 30), b31: sum(d => d > 30), days: Math.max(0, ...mine.map(age)), late: Math.max(0, ...mine.map(b => b.overdueDays)), limit: s.creditLimit }; }).filter(r => r.total > 0.5).sort((a, b) => b.late - a.late || b.days - a.days || b.total - a.total));
+    setRows(shops.map(s => { const mine = byShop.get(s.id) ?? []; const age = (b: typeof mine[0]) => Math.floor((Date.now() - new Date(b.invoice.date).getTime()) / 86400000); const sum = (f: (d: number) => boolean) => r2(mine.filter(b => f(age(b))).reduce((a, b) => a + b.balance, 0)); return { id: s.id, name: s.name, phone: s.phone, area: s.area, total: r2(mine.reduce((a, b) => a + b.balance, 0)), b0: sum(d => d <= 7), b8: sum(d => d > 7 && d <= 15), b16: sum(d => d > 15 && d <= 30), b31: sum(d => d > 30), days: Math.max(0, ...mine.map(age)), late: Math.max(0, ...mine.map(b => b.overdueDays)), limit: s.creditLimit }; }).filter(r => r.total > OWED).sort((a, b) => b.late - a.late || b.days - a.days || b.total - a.total));
   })(); }, []);
   const tot = (k: 'b0' | 'b8' | 'b16' | 'b31') => r2(rows.reduce((a, r) => a + r[k], 0));
   if (open) return <ShopStatement shopId={open} onBack={() => setOpen(null)} />;
@@ -149,7 +149,7 @@ export function CashFlow({ go }: { go?: (p: string) => void }) {
   useEffect(() => { (async () => {
     const shops = new Map((await db.shops.toArray()).map(s => [s.id, s.name]));
     const cos = new Map((await db.companies.toArray()).map(c => [c.id, c.name]));
-    const bal = (await invoiceBalances()).filter(b => b.balance > 0.5);
+    const bal = (await invoiceBalances()).filter(b => b.balance > OWED);
     const byShop = new Map<string, { amount: number; overdue: number; n: number }>();
     for (const b of bal) { const v = byShop.get(b.invoice.shopId) ?? { amount: 0, overdue: 0, n: 0 }; v.amount += b.balance; v.n++; if (b.overdueDays > 0) v.overdue += b.balance; byShop.set(b.invoice.shopId, v); }
     const recv: Line[] = [...byShop.entries()].map(([id, v]) => ({ id, name: shops.get(id) ?? id, amount: r2(v.amount), sub: `${plural(v.n, 'bill')}${v.overdue ? ` · ${'overdue'} ${inr(r2(v.overdue))}` : ''}` })).sort((a, b) => b.amount - a.amount);

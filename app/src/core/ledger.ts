@@ -2,6 +2,9 @@ import { db, today } from './db';
 import type { Invoice, OpeningDue, Payment, Shop } from './types';
 
 // Money rules. Plain code, never AI: every number must be exact and explainable.
+/** a bill still owes when its balance is above this: a float tolerance only (half a paisa). Every paisa owed stays in the dues;
+ *  a small leftover is cleared only by an explicit entry, never hidden (GST review, Part 2 batch 1 — was ₹0.50). */
+export const OWED = 0.005;
 export const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export interface InvoiceBalance { invoice: Invoice; paid: number; credited: number; balance: number; overdueDays: number }
@@ -47,12 +50,12 @@ async function balancesAndAdvance(shopId?: string): Promise<{ rows: InvoiceBalan
     const balance = r2(invoice.total - paid - credited);
     const days = shops.get(invoice.shopId)?.creditDays ?? 0;
     const due = new Date(invoice.date).getTime() + days * 86400000;
-    const overdueDays = balance > 0.5 ? Math.max(0, Math.floor((t - due) / 86400000)) : 0;
+    const overdueDays = balance > OWED ? Math.max(0, Math.floor((t - due) / 86400000)) : 0;
     return { invoice, paid, credited, balance, overdueDays };
   }).sort((a, b) => a.invoice.date.localeCompare(b.invoice.date) || a.invoice.number.localeCompare(b.invoice.number));
   // a bill paid in full and then credited (credit note, modified bill) owes the shop money: that is advance too
   for (const r of rows) if (r.balance < 0) { advBy.set(r.invoice.shopId, r2((advBy.get(r.invoice.shopId) ?? 0) - r.balance)); r.paid = r2(r.paid + r.balance); r.balance = 0; }
-  for (const r of rows) { const adv = advBy.get(r.invoice.shopId) ?? 0; if (adv > 0 && r.balance > 0) { const use = Math.min(adv, r.balance); r.balance = r2(r.balance - use); r.paid = r2(r.paid + use); advBy.set(r.invoice.shopId, r2(adv - use)); if (r.balance <= 0.5) r.overdueDays = 0; } }
+  for (const r of rows) { const adv = advBy.get(r.invoice.shopId) ?? 0; if (adv > 0 && r.balance > 0) { const use = Math.min(adv, r.balance); r.balance = r2(r.balance - use); r.paid = r2(r.paid + use); advBy.set(r.invoice.shopId, r2(adv - use)); if (r.balance <= OWED) r.overdueDays = 0; } }
   return { rows, advanceLeft: advBy };
 }
 
@@ -60,7 +63,7 @@ export async function shopOutstanding(shopId: string) {
   // advance (excess paid, money on cancelled bills, bills credited below zero) is applied to the oldest bills
   // inside balancesAndAdvance; what is left over is the shop's unused advance
   const { rows, advanceLeft } = await balancesAndAdvance(shopId);
-  const bal = rows.filter(b => b.balance > 0.5);
+  const bal = rows.filter(b => b.balance > OWED);
   const advance = r2(Math.max(0, advanceLeft.get(shopId) ?? 0));
   return {
     total: r2(bal.reduce((s, b) => s + b.balance, 0) - advance),
@@ -79,7 +82,7 @@ export async function allOutstanding(): Promise<Map<string, ShopDue>> {
   const blank = (): ShopDue => ({ total: 0, overdue: 0, maxOverdueDays: 0, bills: 0, amount: 0, oldestDays: 0 });
   const now = Date.now();
   for (const b of rows) {
-    if (b.balance <= 0.5) continue;
+    if (b.balance <= OWED) continue;
     const v = out.get(b.invoice.shopId) ?? blank();
     v.total = r2(v.total + b.balance); v.amount = r2(v.amount + b.balance); v.bills++;
     v.oldestDays = Math.max(v.oldestDays, Math.floor((now - new Date(b.invoice.date).getTime()) / 86400000));
@@ -102,13 +105,13 @@ export async function receivablesAgeing() {
   const by = new Map<string, Row>();
   const at = (id: string) => by.get(id) ?? (by.set(id, { shopId: id, shop: shops.get(id)?.name ?? '', area: shops.get(id)?.area ?? '', b0_30: 0, b31_60: 0, b61_90: 0, b90: 0, advance: 0, total: 0 }), by.get(id)!);
   for (const b of rows) {
-    if (b.balance <= 0.5) continue;
+    if (b.balance <= OWED) continue;
     const r = at(b.invoice.shopId), a = age(b.invoice.date);
     const k = a <= 30 ? 'b0_30' : a <= 60 ? 'b31_60' : a <= 90 ? 'b61_90' : 'b90';
     r[k] = r2(r[k] + b.balance);
   }
   for (const [id, adv] of advanceLeft) if (adv > 0 && by.has(id)) at(id).advance = r2(adv);
-  const out = [...by.values()].map(r => ({ ...r, total: r2(r.b0_30 + r.b31_60 + r.b61_90 + r.b90 - r.advance) })).filter(r => Math.abs(r.total) > 0.5 || r.advance > 0)
+  const out = [...by.values()].map(r => ({ ...r, total: r2(r.b0_30 + r.b31_60 + r.b61_90 + r.b90 - r.advance) })).filter(r => Math.abs(r.total) > OWED || r.advance > 0)
     .sort((a, b) => b.b90 - a.b90 || b.total - a.total);
   const sum = (k: keyof Row) => r2(out.reduce((a, r) => a + (r[k] as number), 0));
   return { rows: out, totals: { b0_30: sum('b0_30'), b31_60: sum('b31_60'), b61_90: sum('b61_90'), b90: sum('b90'), advance: sum('advance'), total: sum('total') } };
@@ -116,7 +119,7 @@ export async function receivablesAgeing() {
 
 // Payment allocation: oldest bill first (default rule from the definition doc).
 export async function allocateOldestFirst(shopId: string, amount: number) {
-  const bills = (await invoiceBalances(shopId)).filter(b => b.balance > 0.5);
+  const bills = (await invoiceBalances(shopId)).filter(b => b.balance > OWED);
   let left = r2(amount);
   const allocations: { invoiceId: string; amount: number }[] = [];
   for (const b of bills) {

@@ -4,7 +4,7 @@ import { inr, showDate, showDay, showMonth, plural } from './i18n';
 // read photos, never to decide money.
 import { licenceState } from './licence';
 import { db, getSettings, newId, session, today, ymd, daysFrom } from './db';
-import { allOutstanding, invoiceBalances, r2 } from './ledger';
+import { allOutstanding, invoiceBalances, OWED, r2 } from './ledger';
 import { bestProduct, cleanSaid, closeProduct, findAmount, findShopInText, hasWord, learnNames, norm, parseItemLines, toPieces } from './match';
 import {
   companyOptions, orderRow, productOptions, shopOptions, type Col, type Proposal, type Row,
@@ -445,7 +445,7 @@ async function paymentCorrection(shopId: string | undefined, old: number | undef
   const next = nextIn;
   // balances as if the old payment never happened, then the new amount goes to the oldest bills first
   const back = new Map(p.allocations.map(a => [a.invoiceId, a.amount]));
-  const bills = (await invoiceBalances(p.shopId)).map(b => ({ b, base: r2(b.balance + (back.get(b.invoice.id) ?? 0)) })).filter(x => x.base > 0.5);
+  const bills = (await invoiceBalances(p.shopId)).map(b => ({ b, base: r2(b.balance + (back.get(b.invoice.id) ?? 0)) })).filter(x => x.base > OWED);
   let left = next;
   const rows: Row[] = bills.map(({ b, base }) => { const pay = r2(Math.max(0, Math.min(left, base))); left = r2(left - pay); return { invoiceId: b.invoice.id, number: b.invoice.number, date: b.invoice.date, balance: base, overdue: b.overdueDays ? `${b.overdueDays} days` : '', pay }; });
   const name = (await db.shops.get(p.shopId))?.name ?? '';
@@ -732,7 +732,7 @@ async function orderFromPhoto(file: File, _text: string): Promise<Reply> {
 // ---------------------------------------------------------------------------------------------
 async function paymentProposal(shopId: string, amount: number, mode: 'cash' | 'upi' | 'cheque', ref: string, chequeWords: { chequeDate?: string; bank?: string } = {}): Promise<Reply> {
   const chequeDate = mode === 'cheque' ? chequeWords.chequeDate ?? today() : undefined;
-  const bills = (await invoiceBalances(shopId)).filter(b => b.balance > 0.5);
+  const bills = (await invoiceBalances(shopId)).filter(b => b.balance > OWED);
   let left = amount;
   const rows: Row[] = bills.map(b => {
     const pay = r2(Math.max(0, Math.min(left, b.balance)));
@@ -1011,7 +1011,7 @@ async function outstandingTable(shopId?: string, above?: number): Promise<Reply>
   const dues = await allOutstanding(); // one pass over the bills (1,200 shops)
   for (const s of shops.filter(x => !shopId || x.id === shopId)) {
     const o = dues.get(s.id);
-    if (o && o.total > 0.5 && (!above || o.total >= above)) rows.push([s.name, s.area, o.total, o.overdue, o.maxOverdueDays, o.bills]);
+    if (o && o.total > OWED && (!above || o.total >= above)) rows.push([s.name, s.area, o.total, o.overdue, o.maxOverdueDays, o.bills]);
   }
   rows.sort((a, b) => Number(b[2]) - Number(a[2]));
   const total = r2(rows.reduce((a, r) => a + Number(r[2]), 0));

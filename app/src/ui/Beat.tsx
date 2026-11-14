@@ -2,7 +2,7 @@ import { isCashOnly } from '../core/billing';
 import { useEffect, useState } from 'react';
 import { MapPin, ChevronRight, Phone, IndianRupee, PackageCheck, Store, AlertTriangle } from 'lucide-react';
 import { ChangeSet, db, nowIso, session, today, activeShops } from '../core/db';
-import { allOutstanding } from '../core/ledger';
+import { allOutstanding, OWED } from '../core/ledger';
 import { inr, t, showDate } from '../core/i18n';
 import type { Shop, Visit } from '../core/types';
 import { OrderBook } from './OrderBook';
@@ -78,7 +78,7 @@ export function Beat() {
                 <div className="t">{s.shop.name}</div>
                 <div className="s">{s.shop.area}{s.shop.owner ? ` · ${s.shop.owner}` : ''}{s.lastOrder ? ` · last order ${showDate(s.lastOrder)}` : ''}</div>
                 <div className="row" style={{ marginTop: 4 }}>
-                  {s.due > 0.5 && <span className={`badge ${s.overdue > 0 ? 'bad' : ''}`}>{inr(s.due)} {s.overdue > 0 ? `· ${s.overdue}d late` : 'due'}</span>}
+                  {s.due > OWED && <span className={`badge ${s.overdue > 0 ? 'bad' : ''}`}>{inr(s.due)} {s.overdue > 0 ? `· ${s.overdue}d late` : 'due'}</span>}
                   {isCashOnly(s.shop) && <span className="badge warn">Cash only</span>}
                   {s.billedToday && <span className="badge ok"><PackageCheck size={14} /> billed</span>}
                   {s.visit?.farFromShop && <span className="badge warn"><AlertTriangle size={14} /> far from shop</span>}

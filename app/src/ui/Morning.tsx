@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Banknote, Boxes, CalendarClock, Target, TrendingUp, Undo2, Truck } from 'lucide-react';
 import { ChangeSet, db, today, undoBatch, undoRefusal, daysFrom } from '../core/db';
-import { invoiceBalances, r2 } from '../core/ledger';
+import { invoiceBalances, OWED, r2 } from '../core/ledger';
 import { inr, plural, inrR } from '../core/i18n';
 import { confirmBox, notify } from './dialog';
 import type { AuditEntry, Order } from '../core/types';
@@ -136,7 +136,7 @@ async function load(): Promise<Data> {
   for (const i of yInv) for (const l of i.lines) { cost += (l.qty + l.freeQty) * (products.get(l.productId)?.purchaseRate ?? 0); taxable += l.taxable; }
   const profit = r2(taxable - cost);
   // collect
-  const bal = (await invoiceBalances()).filter(b => b.balance > 0.5);
+  const bal = (await invoiceBalances()).filter(b => b.balance > OWED);
   const byShop = new Map<string, { amount: number; days: number }>();
   for (const b of bal) { const v = byShop.get(b.invoice.shopId) ?? { amount: 0, days: 0 }; v.amount = r2(v.amount + b.balance); v.days = Math.max(v.days, b.overdueDays); byShop.set(b.invoice.shopId, v); }
   const dueToday = r2(bal.filter(b => { const s = shops.get(b.invoice.shopId); const due = new Date(b.invoice.date).getTime() + (s?.creditDays ?? 0) * 86400000; return due <= Date.now(); }).reduce((a, b) => a + b.balance, 0));

@@ -114,6 +114,10 @@ Branch `apk` (repo Vishnupriyen/Hanubix). The owner wants plain, simple words, o
 - Fixes G2 stock: company-bill differences attach to lines (Diff.line, else the product's lines in order; each line checked against its
   own qty + free) — 2×10 with 4 short now stocks 16; each line its own lot (blank batch = bill no.), purchase lines name their lot
   (batchId) and P&L costs by lot first (lotCostRates); typed purchases refuse only a true double (product+batch+expiry+rate). Test: part2-stock-lines.
+- Fixes G3 GST & money: scheme claim = min(scheme, discount actually given; free = min(scheme free, free given)); splitShort works free
+  pieces on the product's combined qty (otherQty); GSTR-1 HSN key HSN+UQC+rate with the product's unit (uqcLabel, e.g. KGS-KILOGRAMS),
+  e-invoice Unit from the product; dues keep every paisa (ledger OWED = 0.005, every screen/TESRAX/owner card; statement patch line
+  removed). NOT built: the explicit write-off/round-off entry at collection — needs a data-model decision. Test: part2-money-fixes.
 
 ## Waiting for the owner
 - **Rule (owner, 14 Nov): work only through the AI team** (CLAUDE.md, "Work only through the team"). Part 1 was built by the

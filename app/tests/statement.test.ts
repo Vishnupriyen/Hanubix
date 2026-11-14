@@ -97,7 +97,9 @@ describe('statement — accounts review', () => {
     const close = all.find(r => r[1] === 'Balance due')!;
     const { shopOutstanding } = await import('../src/core/ledger');
     expect(close[5]).toBe((await shopOutstanding(s.id)).total);
-    expect(all.some(r => String(r[1]).startsWith('Rounding'))).toBe(true);
+    // every paisa owed stays (GST review, Part 2 batch 1): ₹0.30 is due, and no "treated as settled" rounding line patches it away
+    expect(close[5]).toBe(0.3);
+    expect(all.some(r => String(r[1]).startsWith('Rounding'))).toBe(false);
   });
   it('2 a credit note on a cancelled bill is not on the statement', async () => {
     const s = await freshShop('Cancel Stores'); const id = await bill(s.id, 500, '2026-10-01', { cancelled: true });

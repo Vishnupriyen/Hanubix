@@ -5,7 +5,7 @@ import { activeSchemes, applySchemes, allStock } from '../core/billing';
 import { bookOrder, updateMyOrder } from '../core/pipeline';
 import { askText, confirmBox } from './dialog';
 import { useBack } from './useBack';
-import { r2, shopOutstanding } from '../core/ledger';
+import { OWED, r2, shopOutstanding } from '../core/ledger';
 import { norm } from '../core/match';
 import { inr, t, plural } from '../core/i18n';
 import type { Order, Company, Product, Role, Scheme, Shop, Visit, Invoice } from '../core/types';
@@ -128,7 +128,7 @@ export function OrderBook({ shop, visit, onClose, existing }: { shop: Shop; visi
         <div className="grow"><div className="h">{shop.name}</div><div className="muted">{shop.area}{shop.owner ? ` · ${shop.owner}` : ''}</div></div>
         {lastOrder.length > 0 && <button className="btn small" onClick={repeatLast}><Repeat /> {'Repeat last'}</button>}
       </div>
-      {due.total > 0.5 && (
+      {due.total > OWED && (
         <div className={`alert ${due.overdue > 0 ? 'bad' : ''}`} style={{ padding: '8px 12px' }}>
           <AlertTriangle />
           <div style={{ minWidth: 0 }}><b>{inr(due.total)} {'pending'}</b>{due.overdue > 0 && <> · <b style={{ color: 'var(--bad)' }}>{inr(due.overdue)}</b> {'overdue'}</>}<div className="muted">{shop.creditLimit > 0 ? `${'Credit limit'} ${inr(shop.creditLimit)} · ${shop.creditDays} ${'days'}` : ''}</div></div>

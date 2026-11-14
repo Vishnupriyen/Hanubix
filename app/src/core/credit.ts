@@ -107,15 +107,19 @@ export async function makeCreditNote(cs: ChangeSet, inv: Invoice, items: CreditI
   return cn;
 }
 
-/** a shortage of S pieces on a line, split into paid and free: the shop keeps the most paid pieces whose free pieces still fit */
-export function splitShort(line: Invoice['lines'][0], short: number, p: Product | undefined, schemes: Scheme[], date: string) {
+/** a shortage of S pieces on a line, split into paid and free: the shop keeps the most paid pieces whose free pieces still fit.
+ *  The free pieces are earned on the product's combined qty (the same product may sit on other lines of the bill: their
+ *  paid pieces, `otherQty`, count too — as refreshSchemeClaims and priceLines work them out). */
+export function splitShort(line: Invoice['lines'][0], short: number, p: Product | undefined, schemes: Scheme[], date: string, otherQty = 0) {
   const delivered = Math.max(0, line.qty + line.freeQty - short);
-  const free = (q: number) => p ? applySchemes(p, q, line.rate, activeSchemes(schemes, p, date)).freeQty : Math.floor(line.freeQty * q / (line.qty || 1));
+  const free = (q: number) => p ? applySchemes(p, q + otherQty, line.rate, activeSchemes(schemes, p, date)).freeQty : Math.floor(line.freeQty * q / (line.qty || 1));
   let keep = Math.min(line.qty, delivered);
   while (keep > 0 && keep + Math.min(free(keep), line.freeQty) > delivered) keep--;
   const paid = line.qty - keep;
   return { paid, free: Math.max(0, Math.min(line.freeQty, short - paid)) };
 }
+/** paid pieces of the same product on the bill's other lines (for splitShort) */
+export const otherQty = (lines: Invoice['lines'], i: number) => lines.reduce((a, l, k) => k !== i && l.productId === lines[i]?.productId ? a + l.qty : a, 0);
 
 /**
  * Extra pieces given from the van at delivery: a delivered bill is never re-written, so they go on a NEW bill (next number),

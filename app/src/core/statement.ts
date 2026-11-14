@@ -4,7 +4,7 @@
 // a "Rounding" line shows it, so the closing always equals the balance due the app shows (GST & accounts review, 12 Nov 2026).
 import { db, getSettings, today } from './db';
 import { inr, localStamp, showDate } from './i18n';
-import { invoiceBalances, openingAsBill, paymentCounts, r2, shopOutstanding } from './ledger';
+import { invoiceBalances, openingAsBill, OWED, paymentCounts, r2, shopOutstanding } from './ledger';
 import { downloadWorkbook } from './readers';
 import type { CreditNote, Invoice, Payment, Shop } from './types';
 
@@ -23,7 +23,7 @@ export async function shopStatement(shopId: string): Promise<StatementData | nul
   const pending = allPays.filter(p => !paymentCounts(p));
   const old = await db.openingDues.where('shopId').equals(shopId).toArray();
   const cns = (await db.creditNotes.where('shopId').equals(shopId).toArray()).filter(c => live.has(c.invoiceId)); // a note on a cancelled bill is not in the ledger
-  const o = await shopOutstanding(shopId); const bal = (await invoiceBalances(shopId)).filter(b => b.balance > 0.5);
+  const o = await shopOutstanding(shopId); const bal = (await invoiceBalances(shopId)).filter(b => b.balance > OWED);
   const due = { total: o.total, overdue: o.overdue, days: Math.max(0, ...bal.map(b => b.overdueDays)), advance: o.advance };
   const time = (iso: string) => localStamp(iso).slice(11) || '00:00:00';
   const rows: StatementRow[] = [
@@ -35,10 +35,6 @@ export async function shopStatement(shopId: string): Promise<StatementData | nul
     ...old.map(x => ({ at: x.date + 'T00:00:00', kind: 'bill' as const, ref: openingAsBill(x).number, debit: x.amount, credit: 0, note: 'opening balance' })),
     ...cns.map((c: CreditNote) => ({ at: `${c.date}T${time(c.createdAt)}`, kind: 'cn' as const, ref: c.number, debit: 0, credit: c.total, note: c.reason, cn: c })),
   ].sort((a, b) => b.at.localeCompare(a.at));
-  // a few paise the app treats as settled (bills with ₹0.50 or less left): one line, so the closing is the balance due
-  const forward = r2(rows.reduce((a, r) => a + r.debit - r.credit, 0));
-  const diff = r2(forward - due.total);
-  if (Math.abs(diff) >= 0.01) rows.unshift({ at: `${today()}T23:59:59`, kind: 'round', ref: '', debit: diff < 0 ? -diff : 0, credit: diff > 0 ? diff : 0, note: 'balances of ₹0.50 or less on a bill are treated as settled' });
   return { shop, rows, due, staff, pending };
 }
 

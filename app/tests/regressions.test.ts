@@ -65,7 +65,9 @@ describe('review fixes', () => {
   });
 
   it('a paid bill credited below zero becomes shop advance', async () => {
-    const shop = shops[2]; const p = products[0];
+    // a fresh shop with no other bills, so nothing else moves its balance (deterministic — Part 2 batch 1 review)
+    const c0 = new ChangeSet(); const shop = c0.put<Shop>('shops', { ...shops[2], id: undefined as never, name: 'Fresh Advance Shop' }); await c0.commit('fresh shop');
+    const p = products[0];
     const { invoices: [inv] } = await approvePicked(await pickedOrder(shop, p, 4));
     const before = await shopOutstanding(shop.id);
     const cs = new ChangeSet();

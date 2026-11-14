@@ -11,7 +11,7 @@ import { receiptNumber } from './receipts';
 import { isPendingNumber } from './sync';
 import { commitOpeningDues, commitOpeningStock, validateOpeningDues, validateOpeningStock } from './opening';
 import { billChangeBlock, creditNoteDeadline, GST_RATES, shopStateCode } from './gst';
-import { allocateOldestFirst, invoiceBalances, r2, validGstin } from './ledger';
+import { allocateOldestFirst, invoiceBalances, OWED, r2, validGstin } from './ledger';
 import { toIsoDate } from './readers';
 import type { Advance, Batch, Company, Expense, Invoice, LeaveRequest, Payment, Product, Purchase, Scheme, Shop, Visit } from './types';
 
@@ -571,7 +571,7 @@ async function commitProposal(p: Proposal): Promise<Committed> {
         shopId: s(fieldValue(p, 'shopId')), amount, mode: s(fieldValue(p, 'mode')) as Payment['mode'], ref: s(fieldValue(p, 'ref')),
         ...(isCheque ? { chequeDate: toIsoDate(s(fieldValue(p, 'chequeDate'))) || today(), ...(s(fieldValue(p, 'chequeBank')) ? { chequeBank: s(fieldValue(p, 'chequeBank')) } : {}) } : {}),
         date: today(), collectedBy: session().userId, shopConfirmed: inOffice || !!p.meta.shopConfirmed,
-        confirmPhoto: p.meta.photo as string | undefined, allocations, advance: advance > 0.5 ? advance : 0,
+        confirmPhoto: p.meta.photo as string | undefined, allocations, advance: advance > OWED ? advance : 0,
         settled: inOffice, status: 'ok', receiptNo,
       }, 'payment');
       message = `Payment ${inr(amount)} recorded. Receipt ${isPendingNumber(receiptNo) ? '(numbered at next sync)' : receiptNo}.`;
@@ -588,7 +588,7 @@ async function commitProposal(p: Proposal): Promise<Committed> {
       cs.put<Payment>('payments', {
         shopId: old.shopId, amount, mode: s(fieldValue(p, 'mode')) as Payment['mode'], ref: s(fieldValue(p, 'ref')), date: old.date,
         collectedBy: old.collectedBy, shopConfirmed: old.shopConfirmed, confirmPhoto: old.confirmPhoto, allocations,
-        advance: advance > 0.5 ? advance : 0, settled: old.settled, status: 'ok', correctionOf: old.id, receiptNo: await receiptNumber(cs),
+        advance: advance > OWED ? advance : 0, settled: old.settled, status: 'ok', correctionOf: old.id, receiptNo: await receiptNumber(cs),
       }, 'payment corrected (new)');
       message = `Payment corrected: ${inr(old.amount)} → ${inr(amount)}.`;
       break;
@@ -801,7 +801,7 @@ async function commitProposal(p: Proposal): Promise<Committed> {
 }
 
 export async function balancesForShop(shopId: string) {
-  return (await invoiceBalances(shopId)).filter(b => b.balance > 0.5);
+  return (await invoiceBalances(shopId)).filter(b => b.balance > OWED);
 }
 
 /**

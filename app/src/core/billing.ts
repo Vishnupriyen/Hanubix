@@ -1,7 +1,7 @@
 import { inr } from './i18n';
 import { nextNumbers, PENDING_MARK, server } from './sync';
 import { ChangeSet, db, getSettings, newId, today } from './db';
-import { isB2B, r2, shopOutstanding } from './ledger';
+import { isB2B, OWED, r2, shopOutstanding } from './ledger';
 import { isInterState, lineCredits, taxOn } from './gst';
 import type { Batch, ClaimEntry, CreditNote, Invoice, InvoiceLine, Order, OrderLine, Product, Scheme, Settings, Shop } from './types';
 
@@ -108,20 +108,23 @@ export async function refreshSchemeClaims(cs: ChangeSet, inv: Invoice, cns: Cred
   const credits = lineCredits(inv, cns);
   const want = new Map<string, { qty: number; amount: number; names: string[] }>();
   // % schemes on each line's own value; free pieces once per product on the combined kept qty (a product can sit on two lines)
-  const keptOf = new Map<string, { qty: number; rate: number }>();
+  const keptOf = new Map<string, { qty: number; rate: number; free: number }>();
   if (!inv.cancelled) inv.lines.forEach((l, i) => {
     const p = products.get(l.productId); if (!p) return;
     const kept = Math.max(0, l.qty - credits[i].paid);
     const sch = applySchemes(p, kept, l.rate, activeSchemes(schemes, p, inv.date).filter(s => s.source === 'company'));
     const w = want.get(l.productId) ?? { qty: 0, amount: 0, names: [] };
-    w.qty += kept; w.amount = r2(w.amount + sch.coDiscount); w.names = [...new Set([...w.names, ...sch.names])];
+    // the company pays back what the shop was actually given: never more than the line's own discount on the kept pieces
+    // (the owner's Disc % may give less than the scheme, or nothing)
+    const given = l.qty > 0 ? r2(l.discount * kept / l.qty) : 0;
+    w.qty += kept; w.amount = r2(w.amount + Math.min(sch.coDiscount, given)); w.names = [...new Set([...w.names, ...sch.names])];
     want.set(l.productId, w);
-    const k = keptOf.get(l.productId); keptOf.set(l.productId, { qty: (k?.qty ?? 0) + kept, rate: k?.rate ?? l.rate });
+    const k = keptOf.get(l.productId); keptOf.set(l.productId, { qty: (k?.qty ?? 0) + kept, rate: k?.rate ?? l.rate, free: (k?.free ?? 0) + Math.max(0, l.freeQty - credits[i].free) });
   });
   for (const [pid, k] of keptOf) {
     const p = products.get(pid)!; const w = want.get(pid)!;
     const sch = applySchemes(p, k.qty, k.rate, activeSchemes(schemes, p, inv.date).filter(s => s.source === 'company'));
-    w.amount = r2(w.amount + sch.coFree * k.rate); if (sch.coFree) w.names = [...new Set([...w.names, ...sch.names])];
+    w.amount = r2(w.amount + Math.min(sch.coFree, k.free) * k.rate); // free pieces actually given (and kept), never more if (sch.coFree) w.names = [...new Set([...w.names, ...sch.names])];
   }
   const seen = new Map(pending.map(e => [e.id, e]));
   // a bill's scheme lines are filed in the bill's month (indexed): never read the whole claim register per bill
@@ -195,7 +198,7 @@ export async function checkOrder(shop: Shop, lines: OrderLine[]): Promise<OrderC
   }
   if (!shop.approved) issues.push('New shop not yet approved by owner');
   const out = await shopOutstanding(shop.id);
-  if (isCashOnly(shop) && out.total > 0.5) issues.push(`Cash-only shop has ${inr(out.total)} pending`);
+  if (isCashOnly(shop) && out.total > OWED) issues.push(`Cash-only shop has ${inr(out.total)} pending`);
   if (shop.creditLimit > 0 && out.total + total > shop.creditLimit) {
     issues.push(`Credit limit ${inr(shop.creditLimit)} crossed (pending ${inr(r2(out.total))} + this ${inr(r2(total))})`);
   }
