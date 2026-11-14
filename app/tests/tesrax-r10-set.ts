@@ -25,9 +25,9 @@ const out: Probe[] = [];
 const add = (s: string, role: Role, exp: string) => { out.push({ s, role, exp }); };
 
 // [page, roles that may open it, the names people use]
-const SCR: [string, Role[], string[]][] = [
+export const SCR: [string, Role[], string[]][] = [
   ['orders-received', [O, F], ['orders received', 'approve orders', 'pending orders', 'orders to approve', 'pending approvals']],
-  ['verify', [O, F], ['picked to verify', 'to verify', 'verify orders', 'picked orders']],
+  ['verify', [O, F, G], ['picked to verify', 'to verify', 'verify orders', 'picked orders']],
   ['billed', [O, F], ['billed', 'bills', 'bill list', 'invoices', 'today bills']],
   ['newshops', [O, F], ['new shops', 'shops to approve', 'pending shops']],
   ['targets', [O, F], ['targets', 'sales targets']],
@@ -179,6 +179,8 @@ for (const t of ['help', 'what can you do', 'what can i say', 'how to use', 'com
 for (const t of ['undo', 'undo last', 'undo that']) add(t, O, '~^undo');
 for (const s of SHOPS) for (const t of ['{s} outstanding', '{s} balance', '{s} bal', '{s} due', 'how much does {s} owe', 'what is pending for {s}', 'who owes more than 10000', 'show outstanding of {s}']) add(t.replace('{s}', s), O, '~^t:');
 export const PROBES: Probe[] = out;
+/** [page, roles that may open it] — must agree with the app's screen table (checked in tesrax-r10.test.ts) */
+export const SCREEN_ROLES = SCR.map(([page, roles]) => [page, roles] as const);
 
 // ---- company side: head office (A), managers (M), reps (R) ----
 export interface CoProbe { s: string; who: 'A' | 'M' | 'R'; exp: string }

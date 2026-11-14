@@ -6,12 +6,12 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { db, setSession } from '../src/core/db';
 import { seedDemo } from '../src/core/seed';
-import { handle } from '../src/core/engine';
+import { handle, SCREENS } from '../src/core/engine';
 import { buildReports } from '../src/core/reports';
 import { periodIn } from '../src/core/reportsVoice';
 import type { Role } from '../src/core/types';
 import { code, loadNames } from './tesrax-code';
-import { PROBES, type Probe } from './tesrax-r10-set';
+import { PROBES, SCREEN_ROLES, type Probe } from './tesrax-r10-set';
 const ids: Partial<Record<Role, string>> = {};
 beforeAll(async () => { await seedDemo(); await loadNames(); for (const s of await db.staff.toArray()) ids[s.role] ??= s.id; });
 
@@ -46,5 +46,10 @@ describe('round 10: every word of the app', () => {
   it('orders, payments, returns, cancels, expenses, help, undo, balances', async () => {
     expect(await misses(part(p => /^(order|~|help)/.test(p.exp) && !p.exp.startsWith('go:')))).toEqual([]);
   }, 600000);
+  it('who may open each screen: the set agrees with the app\'s one screen table (core/engine.ts SCREENS)', () => {
+    const app = new Map(SCREENS.map(s => [s.page, [...s.roles].sort().join(',')]));
+    const off = SCREEN_ROLES.filter(([page, roles]) => app.has(page) && app.get(page) !== [...roles].sort().join(',')).map(([p, r]) => `${p}: set ${[...r].sort().join(',')} / app ${app.get(p)}`);
+    expect(off).toEqual([]);
+  });
   it('the set is complete (screens, reports, files and actions all present)', () => { expect(PROBES.length).toBeGreaterThan(1500); });
 });

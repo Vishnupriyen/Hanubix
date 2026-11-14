@@ -97,7 +97,7 @@ export function learnNames(products: Product[]) {
 /** "&"/"and" that belong to a product name are hidden from message splitting */
 const STATIC_JOINS = /\b(profit|p) and (loss|l)\b|\b(plan|cheques?|vans?|staff|travel) and (billing|upi|drivers?|access|expenses)\b/gi;
 export function protectNames(t: string): string {
-  let out = t.replace(STATIC_JOINS, m => m.replace(' and ', ' ＋ '));
+  let out = t.replace(STATIC_JOINS, m => m.replace(/ and /i, ' ＋ '));
   for (const j of JOINS) { const i = out.toLowerCase().indexOf(j); if (i >= 0) out = out.slice(0, i) + j.replace(/ (&|and) /, ' ＋ ') + out.slice(i + j.length); }
   return out;
 }

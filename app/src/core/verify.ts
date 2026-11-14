@@ -68,6 +68,8 @@ export async function verifyAndBill(orderId: string, rows: VerifyRow[]) {
   try {
     const o = await db.orders.get(orderId);
     if (!o) throw new Error('Order not found.');
+    // the godown may look at Verify picked (Ordered/Picked only) but never makes the bill (server: godown cannot write bills)
+    if ((await db.staff.get(session().userId))?.role === 'godown') throw new Error('The godown checks picked orders; the owner or office makes the bill.');
     if (o.status !== 'picked') throw new Error(o.status === 'billed' ? 'This order is already billed.' : o.status === 'cancelled' ? 'This order was already cancelled.' : 'This order is not packed yet.');
     const block = await makeBillBlock(o, rows);
     if (block) throw new Error(block);

@@ -67,4 +67,12 @@ describe('Verify picked', () => {
     const src = readFileSync('src/ui/Approve.tsx', 'utf8');
     expect(src).toMatch(/const showRates = role !== 'godown'/);
   });
+  it('the godown may open Verify picked (view only) but can never make the bill', async () => {
+    expect(SCREENS.find(s => s.page === 'verify')!.roles).toContain('godown');
+    const o = await packed();
+    const godown = (await db.staff.toArray()).find(s => s.role === 'godown')!;
+    setSession('demo', godown.id);
+    await expect(verifyAndBill(o.id, verifyRows(o))).rejects.toThrow(/godown/i);
+    expect((await db.orders.get(o.id))!.status).toBe('picked');
+  });
 });

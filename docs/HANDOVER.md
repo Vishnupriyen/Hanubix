@@ -123,6 +123,8 @@ Branch `apk` (repo Vishnupriyen/Hanubix). The owner wants plain, simple words, o
   (number on its own line, short sub-line, no outer card) and add form spacing; Reports: chips row, then month select + All to Excel.
 - Fixes G5: verify makeBillBlock refuses a NaN Disc %; partsFor comment corrected; godown opens Verify picked (Home tile + TESRAX words;
   Ordered/Picked only, no Make bill). Test: verify-picked.
+- Gate fix (r10): godown may open Verify picked — the TESRAX test set now agrees with core/engine SCREENS (new test checks every
+  screen's roles against it); verifyAndBill refuses a godown session; "PROFIT AND LOSS" in capitals no longer splits in two. Tests: verify-picked, tesrax-r10.
 
 ## Waiting for the owner
 - **Rule (owner, 14 Nov): work only through the AI team** (CLAUDE.md, "Work only through the team"). Part 1 was built by the
