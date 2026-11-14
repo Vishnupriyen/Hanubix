@@ -63,12 +63,11 @@ export function OrdersReceived({ go }: { go?: (p: string) => void } = {}) {
     onBack={() => { setOpen(null); setTick(x => x + 1); }} onApprove={() => approve(current)} onChanged={() => setTick(x => x + 1)} />;
   return (
     <div className="stack">
-      <div className="sechead"><h3>{'Orders received'} · {orders.length}</h3>
-        <div className="row" style={{ gap: 6 }}>
-          {orders.length > 0 && <button className="btn small" onClick={() => void excel()}><Download size={14} /> Excel</button>}
-          {go && <button className="btn small" onClick={() => go('reports')}><BarChart3 size={14} /> {'Bill reports'}</button>}
-        </div>
-      </div>
+      <div className="sechead"><h3>{'Orders received'} · {orders.length}</h3></div>
+      {(orders.length > 0 || go) && <div className="row" style={{ gap: 6 }}>
+        {orders.length > 0 && <button className="btn small" onClick={() => void excel()}><Download size={14} /> Excel</button>}
+        {go && <button className="btn small" onClick={() => go('reports')}><BarChart3 size={14} /> {'Bill reports'}</button>}
+      </div>}
       {undo && <div className="alert ok"><Check /><div className="grow">{'Approved. Sent to godown'} · {undo.shop}</div><button className="btn small" onClick={async () => { try { await undoApprove(undo.id); setUndo(null); setTick(x => x + 1); } catch (e) { void notify('Can\'t undo', (e as Error).message); setUndo(null); } }}><Undo2 size={14} /> {'Undo'}</button></div>}
       {clean.length > 1 && <button className="link" onClick={async () => { for (const o of clean) await approveOrder(o.id).catch(() => {}); setTick(x => x + 1); }}>{`Approve all ${clean.length} clean`}</button>}
       {orders.map(o => (

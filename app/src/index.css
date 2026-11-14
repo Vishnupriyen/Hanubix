@@ -114,7 +114,7 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 700; margin: 0; lette
 .btn.navy { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
 .btn.ghost { background: transparent; }
 .btn.danger { color: var(--bad); }
-.btn.small { min-height: 36px; padding: 6px 12px; font-size: var(--f2); border-radius: 10px; }
+.btn.small { min-height: 44px; padding: 6px 12px; font-size: var(--f2); border-radius: 10px; }
 .btn.small svg { width: 16px; height: 16px; }
 .btn.block { width: 100%; }
 .btn.big { font-size: var(--f4); min-height: 64px; border-radius: var(--r-lg); }
@@ -185,7 +185,7 @@ h1, h2, h3, h4 { font-family: var(--display); font-weight: 700; margin: 0; lette
 .msg.wide { max-width: 100%; width: 100%; }
 .att { display: inline-block; font-size: var(--f1); background: rgba(255,255,255,.15); border-radius: 6px; padding: 2px 8px; margin-top: 6px; }
 .chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px 2px; background: var(--card); scrollbar-width: none; }
-.chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 7px 12px; font-size: var(--f2); font-weight: 600; white-space: nowrap; }
+.chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 7px 12px; font-size: var(--f2); font-weight: 600; white-space: nowrap; min-height: 44px; display: inline-flex; align-items: center; } /* tap target ≥ 44 px */
 .composer { display: flex; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--card); border-top: 1px solid var(--line); align-items: flex-end; }
 .composer textarea { flex: 1; resize: none; border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; background: var(--paper); max-height: 120px; min-height: 48px; }
 .icon-btn { width: 48px; height: 48px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); display: grid; place-items: center; flex: none; }
@@ -673,6 +673,8 @@ body[data-toast] .main { padding-top: var(--toast-pad, 72px); }
 .linecard .lc-head { display: flex; align-items: center; gap: 8px; }
 .linecard .lc-name { flex: 1; min-width: 0; font-weight: 600; font-size: var(--f3); overflow-wrap: anywhere; }
 .linecard .lc-boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.linecard .lc-boxes.four { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; } /* bill editor: Qty, Rate, Disc %, MRP */
+.linecard .lc-box input[readonly] { cursor: pointer; color: var(--mut); }
 .linecard .lc-box label { display: block; font-size: var(--f1); color: var(--mut); margin-bottom: 2px; }
 .linecard .lc-box input { width: 100%; min-height: 44px; box-sizing: border-box; }
 .linecard .lc-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: var(--f2); color: var(--mut); }
@@ -681,3 +683,7 @@ body[data-toast] .main { padding-top: var(--toast-pad, 72px); }
 .lc-note { font-size: var(--f1); color: var(--mut); }
 .lc-short { color: var(--bad); font-weight: 600; } .lc-extra { color: var(--warn); font-weight: 600; }
 .linecard .lc-boxes.pick-first { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); } .linecard .lc-boxes.pick-first .lc-box:first-child input { font-size: var(--f5); font-weight: 700; }
+
+/* Reports: month picker and All to Excel share one 44 px row (Part 2 batch 1 look review) */
+.report-bar { flex-wrap: nowrap; }
+.report-bar select { min-height: 44px; min-width: 0; }

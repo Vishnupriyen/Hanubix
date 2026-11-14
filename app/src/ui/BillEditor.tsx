@@ -21,7 +21,9 @@ export function BillEditor({ invoice, onClose }: { invoice: Invoice; onClose: (s
   const [products, setProducts] = useState<Product[]>([]);
   const [schemes, setSchemes] = useState<Scheme[]>([]);
   const [shopId, setShopId] = useState(invoice.shopId);
-  const [edits, setEdits] = useState<Edit[]>(invoice.lines.map(l => ({ productId: l.productId, qty: l.qty, rate: l.rate, mrp: l.mrp, ...(l.discountPct != null ? { discountPct: l.discountPct } : l.discount > 0 ? { discount: l.discount } : {}) })));
+  // a line's Disc % as saved; an old line typed in ₹ keeps its ₹ (shown read-only, "₹50 off", until tapped); a scheme's own
+  // discount is worked out again by the same pricing (shown as its Disc % with "= ₹…" under it)
+  const [edits, setEdits] = useState<Edit[]>(invoice.lines.map(l => ({ productId: l.productId, qty: l.qty, rate: l.rate, mrp: l.mrp, ...(l.discountPct != null ? { discountPct: l.discountPct } : l.discount > 0 && !(l.schemeNames ?? []).length ? { discount: l.discount } : {}) })));
   const [q, setQ] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => { getSettings().then(setS); db.shops.toArray().then(x => setShops(x.filter(y => y.active !== false))); db.products.toArray().then(ps => setProducts(ps.filter(p => p.companyId === invoice.companyId))); db.schemes.toArray().then(setSchemes); }, [invoice]);
@@ -79,16 +81,17 @@ export function BillEditor({ invoice, onClose }: { invoice: Invoice; onClose: (s
               <div key={i} className="linecard">
                 <div className="lc-head"><div className="lc-name">{i + 1}. {p?.name ?? 'Unknown item'}</div>
                   <button className="icon-btn" onClick={() => setEdits(es => es.filter((_, k) => k !== i))} aria-label={`Remove ${p?.name ?? 'line'}`}><X size={18} /></button></div>
-                <div className="lc-boxes">
+                <div className="lc-boxes four">
                   <div className="lc-box"><label>{'Qty'}</label><NumBox whole value={e.qty} onChange={v => set(i, { qty: v })} label="Qty" /></div>
                   <div className="lc-box"><label>{'Rate'}</label><NumBox value={e.rate} onChange={v => set(i, { rate: v })} label="Rate" /></div>
                   <div className="lc-box"><label>{'Disc %'}</label>
                     {e.discountPct == null && e.discount != null
-                      ? <button className="btn small" style={{ width: '100%', minHeight: 44 }} onClick={() => set(i, { discount: undefined, discountPct: l && l.gross ? Math.round(e.discount! / l.gross * 10000) / 100 : 0 })} aria-label="Change to Disc %">{inr(e.discount)} {'off'}</button>
+                      ? <input readOnly value={`${inr(e.discount!)} off`} aria-label="Old ₹ discount — tap to change to Disc %" onClick={() => set(i, { discount: undefined, discountPct: l && l.gross ? Math.round(e.discount! / l.gross * 10000) / 100 : 0 })} />
                       : <NumBox value={e.discountPct ?? (l && l.gross ? Math.round(l.discount / l.gross * 10000) / 100 : 0)} onChange={v => set(i, { discountPct: v, discount: undefined })} label="Disc %" />}
                     {l && l.discount > 0 && e.discount == null && <div className="lc-note">= {inr(l.discount)}</div>}</div>
+                  <div className="lc-box"><label>MRP</label><NumBox value={e.mrp} onChange={v => set(i, { mrp: v })} label="MRP" /></div>
                 </div>
-                <div className="lc-foot"><span>MRP <input type="number" value={e.mrp} onChange={ev => set(i, { mrp: Number(ev.target.value) })} style={{ width: 64 }} aria-label="MRP" /> · GST {p?.gst ?? 0}%{l?.freeQty ? ` · +${l.freeQty} free` : first !== i && priced[first]?.freeQty ? ` · Free: included in line ${first + 1}` : ''}</span><span className="lc-amt num">{inr(l?.total ?? 0)}</span></div>
+                <div className="lc-foot"><span>GST {p?.gst ?? 0}%{l?.freeQty ? ` · +${l.freeQty} free` : first !== i && priced[first]?.freeQty ? ` · Free: included in line ${first + 1}` : ''}</span><span className="lc-amt num">{inr(l?.total ?? 0)}</span></div>
               </div>
             );
           })}

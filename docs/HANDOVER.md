@@ -118,6 +118,9 @@ Branch `apk` (repo Vishnupriyen/Hanubix). The owner wants plain, simple words, o
   pieces on the product's combined qty (otherQty); GSTR-1 HSN key HSN+UQC+rate with the product's unit (uqcLabel, e.g. KGS-KILOGRAMS),
   e-invoice Unit from the product; dues keep every paisa (ledger OWED = 0.005, every screen/TESRAX/owner card; statement patch line
   removed). NOT built: the explicit write-off/round-off entry at collection — needs a data-model decision. Test: part2-money-fixes.
+- Fixes G4 look: Orders received title alone, Excel/Bill reports row under it; bill editor Disc % box (+ "= ₹…"; scheme lines as %,
+  old ₹-only lines read-only "₹50 off" box → Disc % on tap) and MRP as a 4th 44 px box; .btn.small and .chip min 44 px; Vans list
+  (number on its own line, short sub-line, no outer card) and add form spacing; Reports: chips row, then month select + All to Excel.
 
 ## Waiting for the owner
 - **Rule (owner, 14 Nov): work only through the AI team** (CLAUDE.md, "Work only through the team"). Part 1 was built by the

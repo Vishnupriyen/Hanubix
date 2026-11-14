@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Download, TrendingUp, TrendingDown, Percent, PackageX, Store, Building2, Users, MapPin, Undo2, Gift, Zap, BookOpen, Wallet, IndianRupee } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { thisMonth } from '../core/db';
-import { inr, plural } from '../core/i18n';
+import { inr, plural, showMonth } from '../core/i18n';
 import { downloadWorkbook } from '../core/readers';
 import { buildReports, period as periodOf, type PeriodKind, type ReportData } from '../core/reports';
 
@@ -10,6 +10,8 @@ type Report = ReportData & { icon: LucideIcon };
 const ICONS: Record<string, LucideIcon> = { sales: IndianRupee, daybook: BookOpen, collections: Wallet, fast: TrendingUp, slow: TrendingDown, himargin: Percent, lomargin: Percent, dead: PackageX, shop: Store, company: Building2, salesman: Users, area: MapPin, returns: Undo2, scheme: Gift };
 
 const month = () => thisMonth();
+/** the last n months, newest first ("2026-11", "2026-10" …) for the month picker */
+const lastMonths = (from: string, n: number) => Array.from({ length: n }, (_, k) => { const [y, m] = from.split('-').map(Number); const d = (y * 12 + m - 1) - k; return `${Math.floor(d / 12)}-${String(d % 12 + 1).padStart(2, '0')}`; });
 
 // One menu, every report the owner asked for; each is a table for the chosen period with Excel export (core/reports.ts).
 export function Reports() {
@@ -35,9 +37,12 @@ export function Reports() {
   );
   return (
     <div className="stack">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <div className="segmented" style={{ maxWidth: 320 }}><button className={period === 'month' ? 'on' : ''} onClick={() => setPeriod('month')}>{'This month'}</button><button className={period === 'last' ? 'on' : ''} onClick={() => setPeriod('last')}>{'Last month'}</button><button className={period === '90' ? 'on' : ''} onClick={() => setPeriod('90')}>{'90 days'}</button></div>
-        <input type="month" aria-label="Pick a month" value={period === 'pick' ? picked : ''} max={month()} onChange={e => { if (e.target.value) { setPicked(e.target.value); setPeriod('pick'); } }} />
+      <div className="segmented"><button className={period === 'month' ? 'on' : ''} onClick={() => setPeriod('month')}>{'This month'}</button><button className={period === 'last' ? 'on' : ''} onClick={() => setPeriod('last')}>{'Last month'}</button><button className={period === '90' ? 'on' : ''} onClick={() => setPeriod('90')}>{'90 days'}</button></div>
+      <div className="row report-bar">
+        <select className="grow" aria-label="Pick a month" value={period === 'pick' ? picked : ''} onChange={e => { if (e.target.value) { setPicked(e.target.value); setPeriod('pick'); } }}>
+          <option value="">{'Pick a month'}</option>
+          {lastMonths(month(), 24).map(m => <option key={m} value={m}>{showMonth(m)}</option>)}
+        </select>
         <button className="btn small" onClick={exportAll}><Download size={16} /> {'All to Excel'}</button>
       </div>
       <div className="list">
