@@ -30,8 +30,13 @@ Read this, then `CLAUDE.md`, `docs/HANDOVER.md` (top sections + "Part 2 build lo
   - **Batch 3 still to build:** 2h (Settings → Shops + upload with check — the shared upload piece Part 3 reuses), 2i (Select
     shops), 2j (load sheet per van), 2k/2l (outside PDF bills: pdfjs-dist text layer on the phone, externalBills table, split across
     vans, "Dues collected for other suppliers"; issuer in the duplicate key per PART2_GST §5).
-  - **Pending:** the independent tester's live two-phone/offline + GST-example check of batch 1 was started in chat 4 and may not
-    have reported — rerun it (use a separate git worktree so it never touches the developer's tree).
+  - **Batch 1 live check DONE (tester, a2685d0):** no money, stock or sync bug; GST example matches to the paisa; order rules hold.
+    **Fix job (small, developer A first):** (1) MEDIUM security — server/src/rules.ts ~41/51-58: the DELIVERY_FIELDS skip has no role
+    check, so a salesman/godown phone can mark any bill delivered (deliveryStatus, delivery, vanId) — only delivery/owner/office may;
+    (2) LOW — ORDER_OPEN (~94/119): godown can write invoiceIds/issues on any order without a status change — restrict;
+    (3) refusal wording for staff ("Owner changed this order. Refresh and try again", not field names); (4) TESRAX "1 shop owe" →
+    "owes" (engine.ts ~1019); (5) TESRAX "who owes" counts all shops but the Home card counts active shops — use one rule;
+    (6) server/src/gen/ is generated + gitignored: make sure CI/deploy generate it (a clean clone can't run server tests).
 - **Parts 3, 4, 5:** not started. Items in docs/HANUBIX_CORRECTIONS_LOCKED.md (Part 3: 17–24, 35; Part 4: 14, 15, 25–32, 36, 39,
   46, 47; Part 5: 37, 38, 40–42, 45, 48).
 
